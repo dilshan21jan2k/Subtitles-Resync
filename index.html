@@ -1,0 +1,1899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07090D">
+<meta name="description" content="Fix the timing of an out-of-sync subtitle by lining it up with a correctly timed subtitle for your exact copy of the movie.">
+<title>Subtitle Resync</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+Sinhala:wght@400;600&display=swap" rel="stylesheet">
+<style>
+/* Liquid glass, dark. Layout: glass app bar, three numbered glass cards, a luminous amber Sync action,
+   then a result panel; search results and API keys open as glass popups. */
+:root {
+  --bg: #06080C;
+  --ink: #F2F5F9;
+  --muted: rgba(232, 238, 246, 0.64);
+  --faint: rgba(232, 238, 246, 0.40);
+  --stroke: rgba(255, 255, 255, 0.14);
+  --stroke-soft: rgba(255, 255, 255, 0.08);
+  --accent: #FFC75A;
+  --accent-ink: #231603;
+  --ice: #8FD3FF;
+  --good: #5BE3A3;
+  --warn: #FFC75A;
+  --bad: #FF8080;
+  --glass-fill: linear-gradient(160deg, rgba(255, 255, 255, 0.11) 0%, rgba(255, 255, 255, 0.045) 45%, rgba(255, 255, 255, 0.03) 100%);
+  --glass-blur: blur(24px) saturate(175%);
+  --display: "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --body: "Manrope", "Noto Sans Sinhala", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --sinhala: "Noto Sans Sinhala", "Iskoola Pota", "Nirmala UI", sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  min-height: 100%;
+  color: var(--ink);
+  font: 15px/1.55 var(--body);
+  -webkit-font-smoothing: antialiased;
+  background-color: var(--bg);
+}
+/* the coloured light behind the glass; a fixed layer so it also stays put on phones */
+body::before {
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(60vmax 45vmax at 6% -6%, rgba(56, 189, 248, 0.32), transparent 62%),
+    radial-gradient(52vmax 40vmax at 100% 4%, rgba(139, 92, 246, 0.32), transparent 60%),
+    radial-gradient(55vmax 42vmax at 72% 108%, rgba(251, 146, 60, 0.22), transparent 62%),
+    radial-gradient(48vmax 36vmax at -4% 100%, rgba(16, 185, 129, 0.18), transparent 60%),
+    var(--bg);
+}
+.wrap {
+  max-width: 1120px; margin: 0 auto; display: grid; gap: 20px;
+  padding: max(18px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) 56px max(18px, env(safe-area-inset-left));
+}
+h1, h2, h3, h4 { margin: 0; text-wrap: balance; }
+p { margin: 0; }
+a { color: var(--ice); }
+.small { font-size: 13px; }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.vh { position: absolute !important; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* the glass material */
+.glass {
+  position: relative;
+  background: var(--glass-fill);
+  border: 1px solid var(--stroke);
+  border-radius: 24px;
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.05),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.02),
+    0 24px 60px rgba(0, 0, 0, 0.45);
+}
+.glass::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: radial-gradient(120% 60% at 10% 0%, rgba(255, 255, 255, 0.10), transparent 55%);
+}
+
+/* app bar */
+.appbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 14px 16px 14px 14px; border-radius: 26px; }
+.brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.logo {
+  flex: none; width: 46px; height: 46px; border-radius: 15px; display: grid; place-items: center;
+  background: linear-gradient(160deg, rgba(255,255,255,0.28), rgba(255,255,255,0.06));
+  border: 1px solid rgba(255,255,255,0.22);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.45), 0 6px 18px rgba(0,0,0,0.35);
+}
+h1 { font-family: var(--display); font-weight: 800; font-size: clamp(22px, 3.4vw, 30px); letter-spacing: -0.01em; line-height: 1.1; }
+.lede { color: var(--muted); max-width: 72ch; padding: 0 4px; }
+
+/* buttons and fields */
+.btn {
+  font: 600 14px var(--body); color: var(--ink); cursor: pointer; text-decoration: none; white-space: nowrap;
+  display: inline-flex; align-items: center; justify-content: center; gap: 9px;
+  padding: 10px 18px; border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.06));
+  border: 1px solid rgba(255,255,255,0.18);
+  -webkit-backdrop-filter: blur(12px) saturate(160%); backdrop-filter: blur(12px) saturate(160%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.32), 0 6px 18px rgba(0,0,0,0.25);
+  transition: background .15s, border-color .15s, transform .1s;
+}
+.btn:hover { background: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.09)); border-color: rgba(255,255,255,0.28); }
+.btn:active { transform: translateY(1px) scale(0.99); }
+.btn svg { flex: none; opacity: 0.9; }
+.btn.primary {
+  color: var(--accent-ink); border-color: rgba(255, 226, 160, 0.9); padding: 13px 28px; font-size: 15px; font-weight: 700;
+  background: linear-gradient(180deg, rgba(255, 222, 140, 0.98) 0%, rgba(255, 190, 80, 0.95) 55%, rgba(255, 160, 60, 0.95) 100%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.75), inset 0 -2px 6px rgba(180, 90, 0, 0.25), 0 10px 34px rgba(255, 176, 64, 0.35);
+}
+.btn.primary:hover { filter: brightness(1.05); }
+.btn.small { padding: 7px 14px; font-size: 13px; }
+.btn.ghost { background: transparent; box-shadow: none; border-color: transparent; -webkit-backdrop-filter: none; backdrop-filter: none; }
+.btn.ghost:hover { background: rgba(255,255,255,0.08); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; filter: none; }
+.icon-btn { width: 38px; height: 38px; padding: 0; }
+:where(button, a, input, select, label.btn):focus-visible { outline: 2px solid var(--ice); outline-offset: 3px; }
+input[type="file"]:focus-visible + label.btn { outline: 2px solid var(--ice); outline-offset: 3px; }
+label.field { display: grid; gap: 6px; font-size: 13px; color: var(--muted); min-width: 0; }
+input[type="text"], input[type="password"] {
+  font: 14px var(--body); color: var(--ink); width: 100%; min-width: 0;
+  padding: 11px 14px; border-radius: 14px;
+  background: rgba(0, 0, 0, 0.30); border: 1px solid var(--stroke);
+  box-shadow: inset 0 2px 6px rgba(0,0,0,0.35);
+}
+input.mono { font-family: var(--mono); font-size: 13px; }
+input::placeholder { color: var(--faint); }
+select {
+  font: 14px var(--body); color: var(--ink); width: 100%; padding: 9px 12px; border-radius: 12px;
+  background: rgba(0,0,0,0.30); border: 1px solid var(--stroke);
+}
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* steps */
+.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.card { padding: 20px; display: grid; gap: 13px; align-content: start; min-width: 0; transition: border-color .2s; }
+.card.drag { border-color: rgba(255, 199, 90, 0.8); }
+.step-head { display: flex; align-items: center; gap: 11px; }
+.num {
+  flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font: 600 13px var(--mono);
+  background: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.06)); border: 1px solid rgba(255,255,255,0.2);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4);
+}
+.card.done .num { background: linear-gradient(180deg, #8AF5C4, #2FBF7E); color: #062016; border-color: rgba(160,255,210,0.7); box-shadow: inset 0 1px 0 rgba(255,255,255,0.6), 0 0 18px rgba(91, 227, 163, 0.35); }
+h2 { font-family: var(--display); font-weight: 700; font-size: 17px; letter-spacing: -0.005em; }
+.why { font-size: 13px; color: var(--muted); }
+.file { font: 13px/1.45 var(--mono); overflow-wrap: anywhere; }
+.box { display: grid; gap: 8px; padding: 13px 14px; border-radius: 16px; border: 1px solid var(--stroke-soft); background: rgba(0, 0, 0, 0.22); min-height: 54px; align-content: start; box-shadow: inset 0 1px 4px rgba(0,0,0,0.3); }
+.box .empty { font-size: 13px; color: var(--faint); }
+.source { font-size: 11px; font-weight: 700; letter-spacing: .08em; color: var(--accent); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: 12px/1.6 var(--mono); padding: 1px 10px; border-radius: 999px; color: var(--muted); background: rgba(255,255,255,0.06); border: 1px solid var(--stroke-soft); white-space: nowrap; }
+.chip b { color: var(--ink); font-weight: 500; }
+.chip.good { color: var(--good); border-color: rgba(91, 227, 163, 0.45); background: rgba(91, 227, 163, 0.08); }
+.chip.warn { color: var(--warn); border-color: rgba(255, 199, 90, 0.45); background: rgba(255, 199, 90, 0.08); }
+.chip.best { color: var(--accent-ink); background: linear-gradient(180deg, #FFE09A, #FFB84D); border-color: transparent; font-weight: 600; }
+.note { font-size: 13px; padding: 10px 12px; border-radius: 14px; border: 1px solid rgba(255,199,90,0.35); background: rgba(255,199,90,0.08); }
+.note.bad { border-color: rgba(255,128,128,0.4); background: rgba(255,128,128,0.08); }
+.ref-actions { display: grid; gap: 8px; }
+.spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(255,199,90,0.3); border-top-color: var(--accent); animation: spin .8s linear infinite; display: inline-block; vertical-align: -2px; margin-right: 7px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* sync + result */
+.runbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; padding: 0 2px; }
+#status { font-size: 14px; color: var(--muted); }
+#status.err { color: var(--bad); }
+.result { padding: 20px; display: grid; gap: 15px; }
+.res-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.verdict { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; padding: 6px 14px; border-radius: 999px; border: 1px solid currentColor; }
+.verdict::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 10px currentColor; }
+.verdict.good { color: var(--good); background: rgba(91,227,163,.1); }
+.verdict.fair { color: var(--warn); background: rgba(255,199,90,.1); }
+.verdict.poor { color: var(--bad); background: rgba(255,128,128,.1); }
+.check-panel { display: grid; gap: 12px; padding-top: 15px; border-top: 1px solid var(--stroke-soft); min-width: 0; }
+.panel-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.panel-head h3 { font-family: var(--display); font-size: 16px; font-weight: 700; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 8px; border-radius: 4px; margin-right: 6px; vertical-align: middle; }
+.canvas-box { width: 100%; border-radius: 16px; background: rgba(0,0,0,0.25); border: 1px solid var(--stroke-soft); padding: 8px 6px 4px; box-shadow: inset 0 1px 4px rgba(0,0,0,0.35); }
+canvas#tl { width: 100%; height: 160px; display: block; }
+.scrub { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; }
+.scrub input { width: 100%; accent-color: var(--accent); }
+.jumps { display: flex; flex-wrap: wrap; gap: 6px; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 6px 10px; border-bottom: 1px solid var(--stroke-soft); }
+td { padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,0.05); vertical-align: top; }
+td.t { font: 13px var(--mono); color: var(--accent); white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.si { font-family: var(--sinhala), var(--body); font-size: 16px; line-height: 1.6; min-width: 170px; }
+td.en { color: var(--muted); min-width: 150px; }
+td.en.none { font-style: italic; color: var(--faint); }
+.ref-inline { display: none; }
+.dl-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 18px; align-items: center; padding-top: 15px; border-top: 1px solid var(--stroke-soft); }
+.dl-row .names { display: grid; gap: 4px; min-width: 0; }
+
+/* popups */
+dialog {
+  padding: 0; color: var(--ink); width: min(480px, calc(100vw - 28px)); max-height: calc(100dvh - 40px);
+  background: linear-gradient(160deg, rgba(40, 46, 58, 0.72), rgba(18, 21, 28, 0.78));
+  border: 1px solid rgba(255,255,255,0.16); border-radius: 26px;
+  -webkit-backdrop-filter: blur(30px) saturate(180%); backdrop-filter: blur(30px) saturate(180%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 30px 80px rgba(0,0,0,0.6);
+}
+dialog.wide { width: min(760px, calc(100vw - 28px)); }
+dialog::backdrop { background: rgba(3, 4, 7, 0.55); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+.dlg { padding: 20px; display: grid; gap: 14px; }
+.dlg-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dlg-head h3 { font-family: var(--display); font-size: 19px; font-weight: 800; }
+.key-list { display: grid; gap: 8px; }
+.key-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 11px 14px; border-radius: 16px; background: rgba(0,0,0,0.25); border: 1px solid var(--stroke-soft); }
+.key-row .k { font-weight: 600; font-size: 14px; }
+.key-row code { grid-column: 1; font: 12px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.key-row .tag { grid-row: 1 / span 2; grid-column: 2; }
+.key-form { display: grid; gap: 12px; padding: 14px; border-radius: 18px; background: rgba(255,255,255,0.04); border: 1px solid var(--stroke-soft); }
+.find-body { display: grid; gap: 14px; overflow-y: auto; max-height: min(64dvh, 620px); padding-right: 2px; }
+.group { display: grid; gap: 8px; }
+.group-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.group-head h4 { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.group-head .count { font: 12px var(--mono); color: var(--faint); }
+.gmsg { font-size: 13px; color: var(--faint); padding: 10px 14px; border-radius: 14px; border: 1px dashed var(--stroke-soft); }
+.gmsg.err { color: var(--bad); border-color: rgba(255,128,128,0.35); }
+.bar { height: 6px; border-radius: 999px; background: rgba(255,255,255,0.08); overflow: hidden; margin-top: 8px; }
+.bar i { display: block; height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, #8FD3FF, #FFC75A); transition: width .2s; }
+.item {
+  width: 100%; text-align: left; font: inherit; color: var(--ink); cursor: pointer;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 14px; align-items: center;
+  padding: 12px 14px; border-radius: 16px; background: rgba(255,255,255,0.05); border: 1px solid var(--stroke-soft);
+  transition: background .15s, border-color .15s;
+}
+.item:hover { background: rgba(255,255,255,0.10); border-color: rgba(255,255,255,0.22); }
+.item.top { border-color: rgba(255, 199, 90, 0.55); background: rgba(255, 199, 90, 0.07); }
+.item .rel { font: 13px/1.4 var(--mono); overflow-wrap: anywhere; }
+.item .go { font-size: 13px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+.item .ierr { grid-column: 1 / -1; font-size: 12px; color: var(--bad); }
+.item[aria-busy="true"] { opacity: 0.7; pointer-events: none; }
+
+@media (max-width: 920px) {
+  .steps { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 540px) {
+  .appbar { padding: 12px; }
+  .logo { width: 40px; height: 40px; border-radius: 13px; }
+  #settingsBtn span { display: none; }
+  #settingsBtn { width: 40px; height: 40px; padding: 0; }
+  .dl-row { grid-template-columns: minmax(0, 1fr); }
+  .runbar .btn.primary, .dl-row .btn.primary { width: 100%; }
+  .scrub { grid-template-columns: 1fr; }
+  th:nth-child(3), td.en { display: none; }
+  .ref-inline { display: block; font-family: var(--body); font-size: 13px; color: var(--muted); margin-top: 2px; }
+  td.si { min-width: 0; }
+  .item { grid-template-columns: minmax(0, 1fr); }
+  .dlg { padding: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="appbar glass">
+    <div class="brand">
+      <div class="logo" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 28 28"><rect x="2" y="4" width="24" height="16" rx="4" fill="none" stroke="#EAF2FF" stroke-width="2"/><rect x="6.5" y="13.5" width="15" height="3.2" rx="1.6" fill="#FFC75A"/><path d="M9 24h10" stroke="#EAF2FF" stroke-width="2" stroke-linecap="round"/></svg>
+      </div>
+      <h1>Subtitle Resync</h1>
+    </div>
+    <button class="btn" type="button" id="settingsBtn" aria-haspopup="dialog" aria-label="Settings">
+      <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3h-4l-.4 2.9a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1c.5.4 1.1.7 1.7 1L11 21h4l.4-2.9c.6-.3 1.2-.6 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+      <span>Settings</span>
+    </button>
+  </header>
+
+  <p class="lede">Lines up an out-of-sync subtitle with your exact copy of the movie. Only the timings change; the text stays exactly as it is.</p>
+
+  <section class="steps" aria-label="Files">
+    <article class="card glass" id="cardVideo" data-kind="video">
+      <div class="step-head"><span class="num">1</span><h2>Your movie file</h2></div>
+      <p class="why">Its name and fingerprint tell us exactly which copy you have. The video itself is not uploaded.</p>
+      <div class="row">
+        <input class="vh" type="file" id="videoFile" accept="video/*,.mkv,.mp4,.avi,.m4v,.ts,.m2ts,.mov,.wmv">
+        <label class="btn" for="videoFile">Choose video</label>
+        <span class="small muted">or type its name</span>
+      </div>
+      <label class="field" for="videoName">File name
+        <input class="mono" type="text" id="videoName" placeholder="Movie.Name.2023.1080p.BluRay.x264-GROUP.mkv" autocomplete="off" spellcheck="false">
+      </label>
+      <div class="chips" id="videoChips"></div>
+    </article>
+
+    <article class="card glass" id="cardSrc" data-kind="src">
+      <div class="step-head"><span class="num">2</span><h2>Out-of-sync subtitle</h2></div>
+      <p class="why">The subtitle with the wrong timing: an .srt, or the .zip it came in.</p>
+      <div class="row">
+        <input class="vh" type="file" id="srcFile" accept=".srt,.vtt,.ass,.ssa,.zip,.txt,application/zip,text/plain">
+        <label class="btn" for="srcFile">Choose subtitle</label>
+      </div>
+      <div class="box" id="srcInfo"><p class="empty">No subtitle yet.</p></div>
+    </article>
+
+    <article class="card glass" id="cardRef" data-kind="ref">
+      <div class="step-head"><span class="num">3</span><h2>Reference subtitle</h2></div>
+      <p class="why">A subtitle that's already in sync with your copy, in any language. Only its timing is used.</p>
+      <div class="ref-actions">
+        <button class="btn" type="button" id="findBtn">Find reference subtitle
+          <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.2 12h17.6M12 3c2.4 2.5 3.7 5.6 3.7 9s-1.3 6.5-3.7 9c-2.4-2.5-3.7-5.6-3.7-9S9.6 5.5 12 3z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+        </button>
+        <input class="vh" type="file" id="refFile" accept=".srt,.vtt,.ass,.ssa,.zip,.txt,application/zip,text/plain">
+        <label class="btn" for="refFile">Choose reference subtitle
+          <svg width="17" height="17" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12.5" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 20.5h7M12 16.5v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </label>
+      </div>
+      <div class="box" id="refInfo"><p class="empty">No reference yet.</p></div>
+    </article>
+  </section>
+
+  <div class="runbar">
+    <button class="btn primary" id="runBtn" type="button">Sync subtitles</button>
+    <p id="status" role="status" aria-live="polite"></p>
+  </div>
+
+  <section class="result glass" id="results" aria-label="Result" hidden>
+    <div class="res-head">
+      <span class="verdict" id="verdict"></span>
+      <p class="small muted" id="verdictText"></p>
+    </div>
+    <div class="chips" id="resChips"></div>
+    <div class="note" id="resNote" hidden></div>
+    <div class="check-panel">
+      <div class="panel-head">
+        <h3>Check the timing</h3>
+        <div class="legend">
+          <span><i style="background:var(--ice)"></i>Reference</span>
+          <span><i style="background:rgba(255,255,255,0.32)"></i>Before</span>
+          <span><i style="background:var(--accent)"></i>After sync</span>
+        </div>
+      </div>
+      <div class="canvas-box"><canvas id="tl" role="img" aria-label="Timeline comparing reference, original and synced subtitle lines"></canvas></div>
+      <div class="scrub">
+        <span class="small muted">Move through the film</span>
+        <input type="range" id="scrub" min="0" max="1000" step="1" value="0" aria-label="Position in the film">
+        <span class="mono small" id="scrubLabel">0:00</span>
+      </div>
+      <div class="jumps" id="jumpBtns"></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>New time</th><th>Your subtitle</th><th>Reference at that moment</th></tr></thead>
+          <tbody id="preview"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="dl-row">
+      <div class="names">
+        <p class="small muted">Fixed subtitle</p>
+        <p class="file" id="outName"></p>
+        <p class="small muted">Put it in the same folder as the movie, with the same name, and most players turn it on by themselves.</p>
+      </div>
+      <button class="btn primary" type="button" id="downloadBtn">Download .srt</button>
+    </div>
+  </section>
+</div>
+
+<dialog id="settingsDlg" aria-labelledby="setTitle">
+  <div class="dlg">
+    <div class="dlg-head">
+      <h3 id="setTitle">API Keys</h3>
+      <button class="btn ghost icon-btn" type="button" data-close aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <p id="keyState" class="muted"></p>
+    <div class="key-list">
+      <div class="key-row"><span class="k">OpenSubtitles</span><code id="osKeyShow"></code><span class="chip tag" id="osKeyTag"></span></div>
+      <div class="key-row"><span class="k">SubDL</span><code id="sdKeyShow"></code><span class="chip tag" id="sdKeyTag"></span></div>
+    </div>
+    <div class="row" id="keyActions">
+      <button class="btn" type="button" id="keysEdit">Use different API keys</button>
+      <button class="btn ghost small" type="button" id="keysReset">Use built-in API keys</button>
+    </div>
+    <form class="key-form" id="keysForm" hidden>
+      <label class="field" for="osKey">OpenSubtitles API key
+        <input type="password" id="osKey" autocomplete="off" spellcheck="false" placeholder="Paste a key, or leave empty to keep the current one">
+      </label>
+      <label class="field" for="sdKey">SubDL API key
+        <input type="password" id="sdKey" autocomplete="off" spellcheck="false" placeholder="Paste a key, or leave empty to keep the current one">
+      </label>
+      <div class="row">
+        <button class="btn primary small" type="submit">Save</button>
+        <button class="btn ghost small" type="button" id="keysCancel">Cancel</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+
+<dialog id="findDlg" class="wide" aria-labelledby="findTitle">
+  <div class="dlg">
+    <div class="dlg-head">
+      <div>
+        <h3 id="findTitle">Reference subtitles</h3>
+        <p class="small muted" id="findFor"></p>
+      </div>
+      <button class="btn ghost icon-btn" type="button" data-close aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="find-body" id="findBody"></div>
+    <div class="row" style="justify-content:space-between">
+      <p class="small muted">Pick one. Any language works, because only the timing is used.</p>
+      <button class="btn small" type="button" id="findAgain">Search again</button>
+    </div>
+  </div>
+</dialog>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+/* Subtitle Resync engine: parsing, release-name parsing, alignment, SRT output.
+   Pure functions, no DOM. Works in browsers and in Node (module.exports). */
+(function (root) {
+  'use strict';
+
+  // ---------- Text decoding ----------
+  function decodeBytes(input) {
+    const b = input instanceof Uint8Array ? input : new Uint8Array(input);
+    if (b.length >= 3 && b[0] === 0xEF && b[1] === 0xBB && b[2] === 0xBF)
+      return { text: new TextDecoder('utf-8').decode(b.subarray(3)), encoding: 'UTF-8' };
+    if (b.length >= 2 && b[0] === 0xFF && b[1] === 0xFE)
+      return { text: new TextDecoder('utf-16le').decode(b.subarray(2)), encoding: 'UTF-16' };
+    if (b.length >= 2 && b[0] === 0xFE && b[1] === 0xFF)
+      return { text: new TextDecoder('utf-16be').decode(b.subarray(2)), encoding: 'UTF-16' };
+    const n = Math.min(b.length, 4000);
+    let zOdd = 0, zEven = 0;
+    for (let i = 0; i < n; i++) if (b[i] === 0) { if (i % 2) zOdd++; else zEven++; }
+    if (n > 20 && zOdd > n * 0.2) return { text: new TextDecoder('utf-16le').decode(b), encoding: 'UTF-16' };
+    if (n > 20 && zEven > n * 0.2) return { text: new TextDecoder('utf-16be').decode(b), encoding: 'UTF-16' };
+    try {
+      return { text: new TextDecoder('utf-8', { fatal: true }).decode(b), encoding: 'UTF-8' };
+    } catch (e) {
+      return { text: new TextDecoder('windows-1252').decode(b), encoding: 'Windows-1252', legacy: true };
+    }
+  }
+
+  // ---------- Subtitle parsing ----------
+  const T = '(?:(\\d{1,3}):)?(\\d{1,2}):(\\d{1,2})(?:[,.:](\\d{1,3}))?';
+  const TIMING_RE = new RegExp('^\\s*' + T + '\\s*-->\\s*' + T);
+
+  function partsToMs(h, m, s, f) {
+    const frac = f ? parseFloat('0.' + f) : 0;
+    return Math.round(((+(h || 0)) * 3600 + (+m) * 60 + (+s) + frac) * 1000);
+  }
+
+  function parseTimed(text) {
+    const lines = text.split('\n');
+    const cues = [];
+    let cur = null, buf = [];
+    const flush = () => {
+      if (!cur) return;
+      while (buf.length && buf[buf.length - 1].trim() === '') buf.pop();
+      while (buf.length && buf[0].trim() === '') buf.shift();
+      cur.text = buf.map(l => l.replace(/\s+$/, '')).filter(l => l.trim() !== '').join('\n');
+      cues.push(cur);
+    };
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(TIMING_RE);
+      if (m) {
+        if (buf.length) {
+          const last = buf[buf.length - 1];
+          const isNum = /^\s*\d+\s*$/.test(last);
+          const prevBlank = buf.length >= 2 && buf[buf.length - 2].trim() === '';
+          if (last.trim() !== '' && (isNum || prevBlank)) buf.pop();
+        }
+        flush();
+        cur = { start: partsToMs(m[1], m[2], m[3], m[4]), end: partsToMs(m[5], m[6], m[7], m[8]) };
+        buf = [];
+      } else if (cur) {
+        buf.push(lines[i]);
+      }
+    }
+    flush();
+    return cues;
+  }
+
+  function assTime(s) {
+    const m = String(s || '').trim().match(/^(\d+):(\d{1,2}):(\d{1,2})(?:[.,](\d{1,3}))?$/);
+    return m ? partsToMs(m[1], m[2], m[3], m[4]) : NaN;
+  }
+
+  function parseASS(text) {
+    const cues = [];
+    let fmt = null, inEvents = false;
+    for (const raw of text.split('\n')) {
+      const line = raw.trim();
+      if (/^\[events\]/i.test(line)) { inEvents = true; continue; }
+      if (/^\[/.test(line)) { inEvents = false; continue; }
+      if (!inEvents) continue;
+      if (/^format\s*:/i.test(line)) {
+        fmt = line.replace(/^format\s*:/i, '').split(',').map(s => s.trim().toLowerCase());
+        continue;
+      }
+      if (/^dialogue\s*:/i.test(line) && fmt) {
+        const parts = line.replace(/^dialogue\s*:/i, '').split(',');
+        const n = fmt.length;
+        const head = parts.slice(0, n - 1).map(s => s.trim());
+        const txt = parts.slice(n - 1).join(',');
+        const s = assTime(head[fmt.indexOf('start')]);
+        const e = assTime(head[fmt.indexOf('end')]);
+        if (isNaN(s) || isNaN(e)) continue;
+        const clean = txt.replace(/\{[^}]*\}/g, '').replace(/\\N/gi, '\n').replace(/\\h/g, ' ').trim();
+        cues.push({ start: s, end: e, text: clean });
+      }
+    }
+    return cues;
+  }
+
+  function detectScript(cues) {
+    let si = 0, ta = 0, lat = 0;
+    const sample = cues.slice(0, 400);
+    for (const c of sample) {
+      for (const ch of c.text) {
+        const cp = ch.codePointAt(0);
+        if (cp >= 0x0D80 && cp <= 0x0DFF) si++;
+        else if (cp >= 0x0B80 && cp <= 0x0BFF) ta++;
+        else if ((cp >= 65 && cp <= 90) || (cp >= 97 && cp <= 122)) lat++;
+      }
+    }
+    const tot = si + ta + lat;
+    if (!tot) return 'Unknown';
+    if (si / tot > 0.3) return 'Sinhala';
+    if (ta / tot > 0.3) return 'Tamil';
+    return 'Latin script';
+  }
+
+  function parseSubtitles(text) {
+    let t = text.replace(/^﻿/, '').replace(/\r\n?/g, '\n');
+    let format = 'SRT';
+    let cues;
+    if (/^\s*\[script info\]/i.test(t) || /\n\s*dialogue\s*:/i.test(t)) {
+      cues = parseASS(t); format = 'ASS';
+    } else {
+      if (/^\s*WEBVTT/.test(t)) format = 'VTT';
+      cues = parseTimed(t);
+    }
+    cues = cues.filter(c => isFinite(c.start) && isFinite(c.end));
+    cues.forEach((c, i) => { c.i = i; });
+    cues.sort((a, b) => a.start - b.start || a.i - b.i);
+    cues.forEach((c, i) => { c.i = i; });
+    return { cues, format, script: detectScript(cues) };
+  }
+
+  // ---------- Release-name parsing ----------
+  const SOURCES = [
+    [/\b(blu[ -]?ray|bdremux|remux)\b/i, 'BluRay'],
+    [/\bbd[ -]?rip\b/i, 'BDRip'],
+    [/\bbr[ -]?rip\b/i, 'BRRip'],
+    [/\bweb[ -]?dl\b/i, 'WEB-DL'],
+    [/\bweb[ -]?rip\b/i, 'WEBRip'],
+    [/\bweb\b/i, 'WEB'],
+    [/\bhdtv\b/i, 'HDTV'],
+    [/\bdvd[ -]?rip\b/i, 'DVDRip'],
+    [/\bhd[ -]?rip\b/i, 'HDRip'],
+    [/\b(cam|hdcam|hdts|telesync)\b/i, 'CAM'],
+  ];
+  const SERVICES = [
+    [/\bamzn\b/i, 'Amazon'], [/\bnf\b/i, 'Netflix'], [/\bdsnp\b/i, 'Disney+'],
+    [/\b(hmax|max)\b/i, 'Max'], [/\batvp\b/i, 'Apple TV+'], [/\bhulu\b/i, 'Hulu'],
+    [/\bpcok\b/i, 'Peacock'], [/\bpmtp\b/i, 'Paramount+'],
+  ];
+  const EDITIONS = [
+    [/\bextended\b/i, 'Extended'], [/\bunrated\b/i, 'Unrated'],
+    [/\bdirector'?s? ?cut\b|\bdc\b/i, "Director's Cut"], [/\bimax\b/i, 'IMAX'],
+    [/\btheatrical\b/i, 'Theatrical'], [/\bremastered\b/i, 'Remastered'],
+  ];
+  const QUALITY_RE = /\b(2160p|1080p|720p|576p|480p|4k|uhd|blu[ -]?ray|bd[ -]?rip|br[ -]?rip|web[ -]?dl|web[ -]?rip|web|hdtv|dvd[ -]?rip|hd[ -]?rip|remux|x26[45]|h ?26[45]|hevc|av1|proper|repack|extended|unrated|imax|amzn|nf|dsnp|hmax|atvp|hdr|dv|10bit|aac|ddp?5 ?1|dts|ac3)\b/i;
+
+  function parseRelease(name) {
+    const out = { raw: '', title: '', year: '', episode: '', resolution: '', source: '', service: '', edition: '', group: '' };
+    if (!name) return out;
+    let base = String(name).replace(/^.*[\\/]/, '');
+    base = base.replace(/\.(mkv|mp4|avi|m4v|mov|wmv|ts|m2ts|webm|flv|mpe?g|srt|vtt|ass|ssa|sub|zip|rar)$/i, '');
+    base = base.replace(/\.(si|sin|sinhala|en|eng|english)$/i, '');
+    out.raw = base;
+    const g = base.match(/-([A-Za-z0-9]{2,})(?:\[[^\]]*\])?$/);
+    const norm = base.replace(/[._]+/g, ' ').replace(/[\[\]()]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (g && !/^(dl|rip|\d+p)$/i.test(g[1]) && QUALITY_RE.test(norm)) out.group = g[1];
+    const res = norm.match(/\b(2160p|1080p|720p|576p|480p)\b/i) || norm.match(/\b(4k|uhd)\b/i);
+    if (res) out.resolution = /4k|uhd/i.test(res[1]) ? '2160p' : res[1].toLowerCase();
+    for (const [re, v] of SOURCES) if (re.test(norm)) { out.source = v; break; }
+    for (const [re, v] of SERVICES) if (re.test(norm)) { out.service = v; break; }
+    for (const [re, v] of EDITIONS) if (re.test(norm)) { out.edition = v; break; }
+    const ep = norm.match(/\bS(\d{1,2}) ?E(\d{1,3})\b/i) || norm.match(/\b(\d{1,2})x(\d{2})\b/);
+    if (ep) out.episode = 'S' + String(+ep[1]).padStart(2, '0') + 'E' + String(+ep[2]).padStart(2, '0');
+    const q = norm.search(QUALITY_RE);
+    const epIdx = ep ? norm.indexOf(ep[0]) : -1;
+    let cut = norm.length;
+    if (q > 0) cut = Math.min(cut, q);
+    if (epIdx > 0) cut = Math.min(cut, epIdx);
+    const head = norm.slice(0, cut);
+    const years = [...head.matchAll(/\b(19\d{2}|20\d{2})\b/g)].filter(m => m.index > 0);
+    let titleEnd = cut;
+    if (years.length) {
+      const y = years[years.length - 1];
+      out.year = y[1];
+      titleEnd = Math.min(titleEnd, y.index);
+    }
+    out.title = norm.slice(0, titleEnd).replace(/\s*-\s*$/, '').trim();
+    if (!out.title) out.title = norm;
+    return out;
+  }
+
+  function compareReleases(video, ref) {
+    const notes = [];
+    let level = 'unknown';
+    if (!video || !ref || (!video.source && !video.group)) return { level, notes };
+    const sameGroup = video.group && ref.group && video.group.toLowerCase() === ref.group.toLowerCase();
+    const sameSource = video.source && ref.source && video.source === ref.source;
+    const webish = s => /^WEB/.test(s || '');
+    if (sameGroup && (sameSource || !ref.source)) { level = 'exact'; notes.push('Same release group (' + video.group + ')'); }
+    else if (sameSource || (webish(video.source) && webish(ref.source))) { level = 'close'; notes.push('Same kind of copy (' + video.source + ')'); }
+    else if (video.source && ref.source) { level = 'different'; notes.push(video.source + ' vs ' + ref.source); }
+    if (video.edition !== ref.edition && (video.edition || ref.edition))
+      notes.push('Edition differs: ' + (video.edition || 'standard') + ' vs ' + (ref.edition || 'standard'));
+    return { level, notes };
+  }
+
+  // ---------- Alignment ----------
+  const BIN = 20; // ms per bin
+  const HEAD = 1500; // only the first 1.5 s of each line is matched, so stretched end times don't bias the result
+
+  const SCALES = [
+    { k: 1, label: 'Same speed' },
+    // k stretches the subtitle's times. A subtitle made for a 25 fps copy is ~4% too fast for a 23.976 fps copy.
+    { k: 25 / 23.976, label: '25 → 23.976 fps' },
+    { k: 23.976 / 25, label: '23.976 → 25 fps' },
+    { k: 25 / 24, label: '25 → 24 fps' },
+    { k: 24 / 25, label: '24 → 25 fps' },
+    { k: 24 / 23.976, label: '24 → 23.976 fps' },
+    { k: 23.976 / 24, label: '23.976 → 24 fps' },
+  ];
+
+  function coverage(ref, extraMs) {
+    let maxEnd = 0;
+    for (const c of ref) if (c.end > maxEnd) maxEnd = c.end;
+    const nb = Math.ceil((maxEnd + extraMs) / BIN) + 2;
+    const diff = new Int32Array(nb + 1);
+    let covered = 0;
+    for (const c of ref) {
+      const a = Math.max(0, Math.floor(c.start / BIN));
+      const b = Math.min(nb, Math.ceil(Math.min(c.end, c.start + HEAD) / BIN));
+      if (b > a) { diff[a]++; diff[b]--; }
+    }
+    const P = new Int32Array(nb + 1);
+    let run = 0, acc = 0;
+    for (let i = 0; i < nb; i++) { run += diff[i]; if (run > 0) acc++; P[i + 1] = acc; }
+    covered = acc;
+    return { P, nb, covered };
+  }
+
+  // score of all cues at one (scale-applied) offset, in bins
+  function totalScore(S, E, n, P, nb, o) {
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      let a = S[i] + o, b = E[i] + o;
+      if (b <= 0 || a >= nb) continue;
+      if (a < 0) a = 0;
+      if (b > nb) b = nb;
+      sum += P[b] - P[a];
+    }
+    return sum;
+  }
+
+  function usable(src) {
+    return src.filter(c => c.end > c.start && c.end - c.start < 20000);
+  }
+
+  function scaledBins(cues, k) {
+    const n = cues.length, S = new Int32Array(n), E = new Int32Array(n);
+    for (let i = 0; i < n; i++) {
+      S[i] = Math.round(cues[i].start * k / BIN);
+      E[i] = S[i] + Math.max(1, Math.round(Math.min((cues[i].end - cues[i].start) * k, HEAD) / BIN));
+    }
+    return { S, E, n };
+  }
+
+  function globalSearch(src, cov, opts) {
+    const maxShift = Math.round((opts.maxShiftMs || 900000) / BIN);
+    const coarse = 25; // 500 ms
+    const scales = opts.fixFramerate === false ? [SCALES[0]] : SCALES;
+    let best = null;
+    const results = [];
+    for (const sc of scales) {
+      const { S, E, n } = scaledBins(src, sc.k);
+      // coarse scan
+      const vals = [];
+      for (let o = -maxShift; o <= maxShift; o += coarse) vals.push([o, totalScore(S, E, n, cov.P, cov.nb, o)]);
+      // top local maxima
+      const peaks = [];
+      for (let i = 0; i < vals.length; i++) {
+        const v = vals[i][1];
+        if ((i === 0 || v >= vals[i - 1][1]) && (i === vals.length - 1 || v >= vals[i + 1][1])) peaks.push(vals[i]);
+      }
+      peaks.sort((a, b) => b[1] - a[1]);
+      let scBest = null;
+      for (const [o0] of peaks.slice(0, 4)) {
+        let bo = o0, bv = -1;
+        for (let o = o0 - coarse; o <= o0 + coarse; o += 1) {
+          const v = totalScore(S, E, n, cov.P, cov.nb, o);
+          if (v > bv) { bv = v; bo = o; }
+        }
+        if (!scBest || bv > scBest.score) scBest = { scale: sc, offset: bo, score: bv };
+      }
+      results.push(scBest);
+      if (!best || scBest.score > best.score * 1.0005) best = scBest;
+    }
+    return { best, results };
+  }
+
+  function dpSegments(src, k, cov, center, opts) {
+    const step = 5; // 100 ms
+    const W = Math.round((opts.windowMs || 180000) / BIN);
+    const half = Math.floor(W / step);
+    const K = 2 * half + 1;
+    const offs = new Int32Array(K);
+    for (let j = 0; j < K; j++) offs[j] = center + (j - half) * step;
+    const { S, E, n } = scaledBins(src, k);
+    const P = cov.P, nb = cov.nb;
+    const penalty = (opts.splitPenaltyMs || 8000) / BIN;
+    let prev = new Float64Array(K), cur = new Float64Array(K);
+    const choice = new Uint8Array(n * K);
+    const rowBest = new Int32Array(n);
+    for (let i = 0; i < n; i++) {
+      let pbV = -Infinity, pbJ = half;
+      if (i > 0) {
+        for (let j = 0; j < K; j++) if (prev[j] > pbV) { pbV = prev[j]; pbJ = j; }
+        rowBest[i - 1] = pbJ;
+      }
+      const si = S[i], ei = E[i];
+      for (let j = 0; j < K; j++) {
+        let a = si + offs[j], b = ei + offs[j], sc = 0;
+        if (b > 0 && a < nb) { if (a < 0) a = 0; if (b > nb) b = nb; sc = P[b] - P[a]; }
+        // tiny pull toward the global offset so unmatched runs stay put
+        sc -= Math.abs(j - half) * 1e-6;
+        if (i === 0) { cur[j] = sc - (j === half ? 0 : penalty); continue; }
+        const stay = prev[j], jump = pbV - penalty;
+        if (jump > stay) { cur[j] = sc + jump; choice[i * K + j] = 1; }
+        else cur[j] = sc + stay;
+      }
+      const t = prev; prev = cur; cur = t;
+    }
+    let bj = half, bv = -Infinity;
+    for (let j = 0; j < K; j++) if (prev[j] > bv) { bv = prev[j]; bj = j; }
+    const assign = new Int32Array(n);
+    let j = bj;
+    for (let i = n - 1; i >= 0; i--) {
+      assign[i] = offs[j];
+      if (i > 0 && choice[i * K + j] === 1) j = rowBest[i - 1];
+    }
+    // collapse into segments
+    const segs = [];
+    for (let i = 0; i < n; i++) {
+      if (!segs.length || segs[segs.length - 1].offset !== assign[i]) segs.push({ from: i, to: i, offset: assign[i] });
+      else segs[segs.length - 1].to = i;
+    }
+    // segments of 1-3 lines are noise (credits, songs): give them a neighbour's timing
+    for (let q = 0; q < segs.length; q++) {
+      const sg = segs[q];
+      if (segs.length > 1 && sg.to - sg.from + 1 < 4) {
+        const nb2 = q > 0 ? segs[q - 1] : segs[q + 1];
+        sg.offset = nb2.offset;
+      }
+    }
+    const joined = [];
+    for (const sg of segs) {
+      const last = joined[joined.length - 1];
+      if (last && last.offset === sg.offset) last.to = sg.to;
+      else joined.push(Object.assign({}, sg));
+    }
+    segs.length = 0; segs.push(...joined);
+    // fine-tune each segment at 20 ms
+    for (const sg of segs) {
+      let bo = sg.offset, bsc = -1;
+      for (let o = sg.offset - step; o <= sg.offset + step; o++) {
+        let s = 0;
+        for (let i = sg.from; i <= sg.to; i++) {
+          let a = S[i] + o, b = E[i] + o;
+          if (b <= 0 || a >= nb) continue;
+          if (a < 0) a = 0; if (b > nb) b = nb;
+          s += P[b] - P[a];
+        }
+        if (s > bsc) { bsc = s; bo = o; }
+      }
+      sg.offset = bo;
+    }
+    // merge neighbours that ended within 60 ms of each other
+    const merged = [];
+    for (const sg of segs) {
+      const last = merged[merged.length - 1];
+      if (last && Math.abs(last.offset - sg.offset) <= 3) last.to = sg.to;
+      else merged.push(Object.assign({}, sg));
+    }
+    return merged;
+  }
+
+  function overlapStats(src, k, offsetsBins, cov) {
+    // offsetsBins: Int32Array per cue
+    const { S, E, n } = scaledBins(src, k);
+    let ov = 0, tot = 0;
+    for (let i = 0; i < n; i++) {
+      tot += E[i] - S[i];
+      let a = S[i] + offsetsBins[i], b = E[i] + offsetsBins[i];
+      if (b <= 0 || a >= cov.nb) continue;
+      if (a < 0) a = 0; if (b > cov.nb) b = cov.nb;
+      ov += cov.P[b] - cov.P[a];
+    }
+    return tot ? ov / tot : 0;
+  }
+
+  /**
+   * Align `src` cues (out of sync) to `ref` cues (correct timing).
+   * opts: { splits: 'off'|'low'|'normal'|'high', fixFramerate: bool, maxShiftMs }
+   */
+  function align(srcAll, refAll, opts) {
+    opts = opts || {};
+    const t0 = Date.now();
+    const src = usable(srcAll);
+    const ref = usable(refAll);
+    if (src.length < 10 || ref.length < 10) throw new Error('Each subtitle needs at least 10 timed lines to sync.');
+    const maxShiftMs = opts.maxShiftMs || 900000;
+    const cov = coverage(ref, maxShiftMs + 300000);
+    // density of reference speech across its own span
+    const refSpan = Math.max(1, (ref[ref.length - 1].end - ref[0].start) / BIN);
+    const density = Math.min(0.95, cov.covered / refSpan);
+
+    const g = globalSearch(src, cov, { maxShiftMs, fixFramerate: opts.fixFramerate });
+    const k = g.best.scale.k;
+
+    const penalties = { low: 16000, normal: 8000, high: 4000 };
+    let segs;
+    if (opts.splits === 'off') {
+      segs = [{ from: 0, to: src.length - 1, offset: g.best.offset }];
+    } else {
+      segs = dpSegments(src, k, cov, g.best.offset, { splitPenaltyMs: penalties[opts.splits] || 8000 });
+    }
+    // A believable result has a few long stretches. Many short ones means the two files don't match.
+    const bigThr = Math.max(30, Math.round(src.length * 0.08));
+    let inBig = 0;
+    for (const sg of segs) if (sg.to - sg.from + 1 >= bigThr) inBig += sg.to - sg.from + 1;
+    const fragmented = segs.length > 1 && inBig / src.length < 0.6;
+    if (fragmented) segs = [{ from: 0, to: src.length - 1, offset: g.best.offset }];
+    // per-usable-cue offsets
+    const offU = new Int32Array(src.length);
+    for (const sg of segs) for (let i = sg.from; i <= sg.to; i++) offU[i] = sg.offset;
+    const after = overlapStats(src, k, offU, cov);
+    const before = overlapStats(src, 1, new Int32Array(src.length), cov);
+    const quality = Math.max(0, Math.min(1, (after - density) / Math.max(0.05, 1 - density)));
+
+    // map offsets to every original cue (unusable cues borrow the previous usable cue's offset)
+    const usableIdx = new Map();
+    src.forEach((c, i) => usableIdx.set(c, i));
+    const perCue = [];
+    let lastOff = segs[0].offset;
+    for (const c of srcAll) {
+      if (usableIdx.has(c)) lastOff = offU[usableIdx.get(c)];
+      perCue.push(lastOff * BIN);
+    }
+    const segments = segs.map(sg => ({
+      offsetMs: sg.offset * BIN,
+      count: sg.to - sg.from + 1,
+      startMs: Math.round(src[sg.from].start * k + sg.offset * BIN),
+      endMs: Math.round(src[sg.to].end * k + sg.offset * BIN),
+    }));
+    return {
+      scale: k,
+      scaleLabel: g.best.scale.label,
+      offsetMs: g.best.offset * BIN,
+      segments,
+      perCueOffsetMs: perCue,
+      matchBefore: before,
+      matchAfter: after,
+      density,
+      quality,
+      fragmented,
+      verdict: fragmented ? 'poor' : quality >= 0.5 ? 'good' : quality >= 0.28 ? 'fair' : 'poor',
+      ms: Date.now() - t0,
+    };
+  }
+
+  function applyTiming(cues, k, perCueOffsetMs, nudgeMs) {
+    nudgeMs = nudgeMs || 0;
+    const out = cues.map((c, i) => ({
+      start: Math.round(c.start * k + perCueOffsetMs[i] + nudgeMs),
+      end: Math.round(c.end * k + perCueOffsetMs[i] + nudgeMs),
+      text: c.text,
+      seg: perCueOffsetMs[i],
+    }));
+    let movedToZero = 0;
+    for (const c of out) {
+      if (c.start < 0) {
+        movedToZero++;
+        const d = Math.max(500, Math.min(3000, c.end - c.start));
+        c.start = 0; c.end = Math.max(c.end, d);
+      }
+      if (c.end <= c.start) c.end = c.start + 500;
+    }
+    // trim overlaps created where the timing jumps
+    for (let i = 0; i + 1 < out.length; i++) {
+      if (out[i].seg !== out[i + 1].seg && out[i].end > out[i + 1].start) {
+        out[i].end = Math.max(out[i].start + 300, out[i + 1].start - 40);
+      }
+    }
+    return { cues: out, movedToZero };
+  }
+
+  function fmtSrtTime(ms) {
+    ms = Math.max(0, Math.round(ms));
+    const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60, f = ms % 1000;
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + ',' + String(f).padStart(3, '0');
+  }
+
+  function fmtClock(ms) {
+    const neg = ms < 0; ms = Math.abs(Math.round(ms));
+    const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60;
+    return (neg ? '-' : '') + (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(s).padStart(2, '0');
+  }
+
+  function buildSrt(cues) {
+    const parts = [];
+    let n = 0;
+    for (const c of cues) {
+      const text = String(c.text || '').split('\n').filter(l => l.trim() !== '').join('\r\n');
+      if (!text) continue;
+      n++;
+      parts.push(n + '\r\n' + fmtSrtTime(c.start) + ' --> ' + fmtSrtTime(c.end) + '\r\n' + text + '\r\n');
+    }
+    return parts.join('\r\n');
+  }
+
+  const api = {
+    decodeBytes, parseSubtitles, parseRelease, compareReleases,
+    align, applyTiming, buildSrt, fmtSrtTime, fmtClock, SCALES, BIN,
+  };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.SubEngine = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+/* Reads text subtitle tracks embedded in a Matroska (.mkv) file, in the browser.
+   Streams the file in chunks, so even large files use little memory. */
+(function (root) {
+  'use strict';
+
+  const ID = {
+    EBML: 0x1A45DFA3, Segment: 0x18538067,
+    SeekHead: 0x114D9B74, Seek: 0x4DBB, SeekID: 0x53AB, SeekPosition: 0x53AC,
+    Info: 0x1549A966, TimecodeScale: 0x2AD7B1,
+    Tracks: 0x1654AE6B, TrackEntry: 0xAE, TrackNumber: 0xD7, TrackType: 0x83, CodecID: 0x86,
+    Language: 0x22B59C, LanguageIETF: 0x22B59D, Name: 0x536E, FlagForced: 0x55AA, FlagDefault: 0x88,
+    ContentEncodings: 0x6D80, ContentEncoding: 0x6240, ContentCompression: 0x5034,
+    ContentCompAlgo: 0x4254, ContentCompSettings: 0x4255,
+    Cluster: 0x1F43B675, Timecode: 0xE7, SimpleBlock: 0xA3, BlockGroup: 0xA0, Block: 0xA1, BlockDuration: 0x9B,
+    Cues: 0x1C53BB6B, Tags: 0x1254C367, Chapters: 0x1043A770, Attachments: 0x1941A469,
+  };
+  const TOP_LEVEL = new Set([ID.Cluster, ID.Cues, ID.Tags, ID.Chapters, ID.Attachments, ID.SeekHead, ID.Info, ID.Tracks]);
+  const TEXT_CODECS = /^(S_TEXT\/UTF8|S_TEXT\/ASS|S_TEXT\/SSA|S_TEXT\/WEBVTT|S_ASS|S_SSA)$/;
+
+  class Reader {
+    constructor(file, chunk, onRead) {
+      this.file = file; this.size = file.size; this.chunk = chunk || (4 << 20);
+      this.buf = new Uint8Array(0); this.start = 0; this.onRead = onRead;
+    }
+    has(pos, n) { return pos >= this.start && pos + n <= this.start + this.buf.length; }
+    async ensure(pos, n) {
+      if (this.has(pos, n)) return true;
+      if (pos >= this.size) return false;
+      const len = Math.min(this.size - pos, Math.max(n, this.chunk));
+      this.buf = new Uint8Array(await this.file.slice(pos, pos + len).arrayBuffer());
+      this.start = pos;
+      if (this.onRead) this.onRead(pos + len);
+      return this.has(pos, n);
+    }
+    at(pos) { return this.buf[pos - this.start]; }
+    bytes(pos, n) { const o = pos - this.start; return this.buf.subarray(o, o + n); }
+  }
+
+  // EBML variable-length numbers
+  function readId(r, pos) {
+    const b = r.at(pos);
+    let len = 1;
+    if (b & 0x80) len = 1; else if (b & 0x40) len = 2; else if (b & 0x20) len = 3; else if (b & 0x10) len = 4; else return null;
+    let v = 0;
+    for (let i = 0; i < len; i++) v = v * 256 + r.at(pos + i);
+    return { value: v, len };
+  }
+  function readVint(r, pos) {
+    const b = r.at(pos);
+    let len = 0;
+    for (let m = 0x80; m; m >>= 1) { len++; if (b & m) break; }
+    if (!(b & (0x100 >> len))) return null;
+    let v = b & ((0x100 >> len) - 1);
+    let allOnes = v === ((0x100 >> len) - 1);
+    for (let i = 1; i < len; i++) { const x = r.at(pos + i); v = v * 256 + x; if (x !== 0xFF) allOnes = false; }
+    return { value: v, len, unknown: allOnes };
+  }
+  function headerSync(r, pos) {
+    const id = readId(r, pos);
+    if (!id) return null;
+    const sz = readVint(r, pos + id.len);
+    if (!sz) return null;
+    return { id: id.value, size: sz.unknown ? -1 : sz.value, dataPos: pos + id.len + sz.len };
+  }
+  async function header(r, pos) {
+    const n = Math.min(12, r.size - pos);
+    if (n <= 1) return null;
+    if (!r.has(pos, n)) await r.ensure(pos, n);
+    return headerSync(r, pos);
+  }
+  function uint(r, pos, n) { let v = 0; for (let i = 0; i < n; i++) v = v * 256 + r.at(pos + i); return v; }
+  function str(r, pos, n) { return new TextDecoder('utf-8').decode(r.bytes(pos, n)).replace(/\0+$/, ''); }
+  function children(r, start, end, fn) {
+    let pos = start;
+    while (pos < end) {
+      const h = headerSync(r, pos);
+      if (!h || h.size < 0) break;
+      fn(h);
+      pos = h.dataPos + h.size;
+    }
+  }
+
+  function parseTracks(r, start, end) {
+    const tracks = [];
+    children(r, start, end, (h) => {
+      if (h.id !== ID.TrackEntry) return;
+      const t = { number: 0, type: 0, codec: '', lang: 'eng', langIETF: '', name: '', forced: false, isDefault: true, comp: null };
+      children(r, h.dataPos, h.dataPos + h.size, (c) => {
+        if (c.id === ID.TrackNumber) t.number = uint(r, c.dataPos, c.size);
+        else if (c.id === ID.TrackType) t.type = uint(r, c.dataPos, c.size);
+        else if (c.id === ID.CodecID) t.codec = str(r, c.dataPos, c.size);
+        else if (c.id === ID.Language) t.lang = str(r, c.dataPos, c.size);
+        else if (c.id === ID.LanguageIETF) t.langIETF = str(r, c.dataPos, c.size);
+        else if (c.id === ID.Name) t.name = str(r, c.dataPos, c.size);
+        else if (c.id === ID.FlagForced) t.forced = uint(r, c.dataPos, c.size) === 1;
+        else if (c.id === ID.FlagDefault) t.isDefault = uint(r, c.dataPos, c.size) === 1;
+        else if (c.id === ID.ContentEncodings) {
+          children(r, c.dataPos, c.dataPos + c.size, (enc) => {
+            if (enc.id !== ID.ContentEncoding) return;
+            children(r, enc.dataPos, enc.dataPos + enc.size, (cc) => {
+              if (cc.id !== ID.ContentCompression) return;
+              const comp = { algo: 0, settings: null };
+              children(r, cc.dataPos, cc.dataPos + cc.size, (x) => {
+                if (x.id === ID.ContentCompAlgo) comp.algo = uint(r, x.dataPos, x.size);
+                else if (x.id === ID.ContentCompSettings) comp.settings = r.bytes(x.dataPos, x.size).slice();
+              });
+              t.comp = comp;
+            });
+          });
+        }
+      });
+      tracks.push(t);
+    });
+    return tracks;
+  }
+
+  async function inflate(data) {
+    const ds = new DecompressionStream('deflate');
+    const out = new Response(new Blob([data]).stream().pipeThrough(ds));
+    return new Uint8Array(await out.arrayBuffer());
+  }
+
+  function assText(s) {
+    // ReadOrder, Layer, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+    const parts = s.split(',');
+    const text = parts.length >= 9 ? parts.slice(8).join(',') : s;
+    return text.replace(/\{[^}]*\}/g, '').replace(/\\N/gi, '\n').replace(/\\h/g, ' ').trim();
+  }
+
+  /**
+   * Find text subtitle tracks in an MKV file.
+   * Resolves { tracks: [{ number, codec, lang, name, forced, isDefault, cues: [{start, end, text}] }], other: [{codec, lang, name}] }
+   */
+  async function extract(file, opts) {
+    opts = opts || {};
+    const cancelled = () => opts.signal && opts.signal.aborted;
+    const r = new Reader(file, opts.chunk, (p) => { if (opts.onProgress) opts.onProgress(Math.min(1, p / file.size)); });
+    let h = await header(r, 0);
+    if (!h || h.id !== ID.EBML) throw new Error('This isn\'t an MKV file.');
+    h = await header(r, h.dataPos + h.size);
+    if (!h || h.id !== ID.Segment) throw new Error('This MKV file looks damaged.');
+    const segData = h.dataPos;
+    const segEnd = h.size < 0 ? r.size : Math.min(r.size, h.dataPos + h.size);
+    let scale = 1000000;
+    let tracks = null, subs = null;
+    const seek = {};
+    const raw = new Map();
+
+    const loadMaster = async (e) => { await r.ensure(e.dataPos, e.size); };
+    const useTracks = (list) => {
+      tracks = list;
+      subs = new Map();
+      for (const t of list) if (t.type === 17 && TEXT_CODECS.test(t.codec)) { subs.set(t.number, t); raw.set(t.number, []); }
+    };
+    const result = () => ({
+      tracks: [], other: (tracks || []).filter((t) => t.type === 17 && !TEXT_CODECS.test(t.codec)).map((t) => ({ codec: t.codec, lang: t.langIETF || t.lang, name: t.name })),
+    });
+
+    let pos = segData;
+    while (pos < segEnd) {
+      if (cancelled()) throw new DOMException('Cancelled', 'AbortError');
+      const e = await header(r, pos);
+      if (!e) break;
+      if (e.id === ID.Cluster) {
+        if (!subs) {
+          if (seek[ID.Tracks] != null) {
+            const tp = segData + seek[ID.Tracks];
+            const th = await header(r, tp);
+            if (th && th.id === ID.Tracks && th.size > 0) { await loadMaster(th); useTracks(parseTracks(r, th.dataPos, th.dataPos + th.size)); }
+          }
+          if (!subs) useTracks([]);
+        }
+        if (!subs.size) return result();
+        pos = await readCluster(e);
+        continue;
+      }
+      if (e.size < 0) { pos = e.dataPos; continue; }
+      if (e.id === ID.SeekHead || e.id === ID.Info || e.id === ID.Tracks) {
+        await loadMaster(e);
+        if (e.id === ID.SeekHead) {
+          children(r, e.dataPos, e.dataPos + e.size, (s) => {
+            if (s.id !== ID.Seek) return;
+            let sid = 0, sp = null;
+            children(r, s.dataPos, s.dataPos + s.size, (x) => {
+              if (x.id === ID.SeekID) sid = uint(r, x.dataPos, x.size);
+              else if (x.id === ID.SeekPosition) sp = uint(r, x.dataPos, x.size);
+            });
+            if (sid && sp != null) seek[sid] = sp;
+          });
+        } else if (e.id === ID.Info) {
+          children(r, e.dataPos, e.dataPos + e.size, (x) => { if (x.id === ID.TimecodeScale) scale = uint(r, x.dataPos, x.size) || 1000000; });
+        } else {
+          useTracks(parseTracks(r, e.dataPos, e.dataPos + e.size));
+          if (!subs.size) return result();
+        }
+      }
+      pos = e.dataPos + e.size;
+    }
+
+    async function readCluster(e) {
+      const end = e.size < 0 ? segEnd : Math.min(segEnd, e.dataPos + e.size);
+      let p = e.dataPos, tc = 0;
+      while (p < end) {
+        const c = await header(r, p);
+        if (!c) return end;
+        if (e.size < 0 && TOP_LEVEL.has(c.id)) return p;
+        if (c.size < 0) return end;
+        if (c.id === ID.Timecode) {
+          if (!r.has(c.dataPos, c.size)) await r.ensure(c.dataPos, c.size);
+          tc = uint(r, c.dataPos, c.size);
+        } else if (c.id === ID.SimpleBlock) {
+          const peek = Math.min(c.size, 8);
+          if (!r.has(c.dataPos, peek)) await r.ensure(c.dataPos, peek);
+          const tn = readVint(r, c.dataPos);
+          if (tn && subs.has(tn.value)) {
+            if (!r.has(c.dataPos, c.size)) await r.ensure(c.dataPos, c.size);
+            takeBlock(c.dataPos, c.size, tc, null);
+          }
+        } else if (c.id === ID.BlockGroup) {
+          const peek = Math.min(c.size, 24);
+          if (!r.has(c.dataPos, peek)) await r.ensure(c.dataPos, peek);
+          const first = headerSync(r, c.dataPos);
+          let wanted = true;
+          if (first && first.id === ID.Block && r.has(first.dataPos, 8)) {
+            const tn = readVint(r, first.dataPos);
+            wanted = !!(tn && subs.has(tn.value));
+          }
+          if (wanted) {
+            if (!r.has(c.dataPos, c.size)) await r.ensure(c.dataPos, c.size);
+            let blk = null, dur = null;
+            children(r, c.dataPos, c.dataPos + c.size, (x) => {
+              if (x.id === ID.Block) blk = x;
+              else if (x.id === ID.BlockDuration) dur = uint(r, x.dataPos, x.size);
+            });
+            if (blk) takeBlock(blk.dataPos, blk.size, tc, dur);
+          }
+        }
+        p = c.dataPos + c.size;
+      }
+      return end;
+    }
+
+    function takeBlock(pos0, size, tc, dur) {
+      const tn = readVint(r, pos0);
+      if (!tn || !subs.has(tn.value)) return;
+      const o = pos0 + tn.len;
+      let rel = r.at(o) * 256 + r.at(o + 1);
+      if (rel > 32767) rel -= 65536;
+      const flags = r.at(o + 2);
+      if ((flags >> 1) & 3) return; // laced blocks are not used for subtitles
+      const data = r.bytes(o + 3, size - (o + 3 - pos0)).slice();
+      raw.get(tn.value).push({ start: (tc + rel) * scale / 1e6, dur: dur == null ? null : dur * scale / 1e6, data });
+    }
+
+    if (!subs) return result();
+    const out = result();
+    const dec = new TextDecoder('utf-8');
+    for (const [num, t] of subs) {
+      const list = raw.get(num);
+      const cues = [];
+      for (const b of list) {
+        let data = b.data;
+        try {
+          if (t.comp && t.comp.algo === 3 && t.comp.settings) { const m = new Uint8Array(t.comp.settings.length + data.length); m.set(t.comp.settings); m.set(data, t.comp.settings.length); data = m; }
+          else if (t.comp && t.comp.algo === 0) data = await inflate(data);
+        } catch (err) { continue; }
+        let text = dec.decode(data);
+        if (/ASS|SSA/.test(t.codec)) text = assText(text);
+        text = text.replace(/\r\n?/g, '\n').trim();
+        if (text) cues.push({ start: Math.round(b.start), dur: b.dur, text });
+      }
+      cues.sort((a, b) => a.start - b.start);
+      for (let i = 0; i < cues.length; i++) {
+        const next = cues[i + 1];
+        let d = cues[i].dur;
+        if (d == null || d <= 0) d = next ? Math.min(4000, Math.max(500, next.start - cues[i].start)) : 2000;
+        cues[i] = { start: cues[i].start, end: Math.round(cues[i].start + d), text: cues[i].text };
+      }
+      out.tracks.push({ number: num, codec: t.codec, lang: t.langIETF || t.lang || 'und', name: t.name, forced: t.forced, isDefault: t.isDefault, cues });
+    }
+    if (opts.onProgress) opts.onProgress(1);
+    return out;
+  }
+
+  const api = { extract };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.MkvSubs = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+(function () {
+  'use strict';
+  // Built-in API keys. Anyone who opens the page source can read them.
+  // To keep them private, set them to '' and paste your keys in Settings on each device instead.
+  const BUILT_IN = { os: 'qsZKB9LqL8zPz6925GCvn1B2ihL2Y3Zb', subdl: 'subdl_XsJJ81SBglzhhRUu9fks95VA2nMVGQaoa8W6F0pfZJY' };
+  const APP_UA = 'SubtitleResync v1.0';
+  const OS_API = 'https://api.opensubtitles.com/api/v1';
+  const SD_API = 'https://api.subdl.com/api/v1/subtitles';
+  const SD_DL = 'https://dl.subdl.com';
+  const OUT_LANG = 'si';
+
+  const E = window.SubEngine;
+  const $ = (s) => document.querySelector(s);
+  const state = { videoFile: null, videoName: '', videoSize: 0, videoHash: '', src: null, ref: null, res: null, out: null, find: null, remaining: null };
+
+  // ---------- helpers ----------
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const plain = (s) => String(s || '').replace(/<[^>]+>/g, '').replace(/\{[^}]*\}/g, '');
+  const sec = (ms, d = 2) => (ms > 0 ? '+' : ms < 0 ? '−' : '±') + (Math.abs(ms) / 1000).toFixed(d) + ' s';
+  const clock = (ms) => E.fmtClock(ms);
+  const clockFine = (ms) => {
+    ms = Math.max(0, Math.round(ms));
+    const h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60, t = Math.floor((ms % 1000) / 100);
+    return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s).padStart(2, '0') + '.' + t;
+  };
+  function setStatus(msg, err) { const el = $('#status'); el.textContent = msg || ''; el.classList.toggle('err', !!err); }
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem('srs.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem('srs.' + k, JSON.stringify(v)); return true; } catch (e) { return false; } },
+    del(k) { try { localStorage.removeItem('srs.' + k); } catch (e) { /* ignore */ } },
+  };
+  function openDlg(d) { if (typeof d.showModal === 'function') { if (!d.open) d.showModal(); } else d.setAttribute('open', ''); }
+  function closeDlg(d) { if (typeof d.close === 'function') d.close(); else d.removeAttribute('open'); }
+  const LANGS = { en: 'English', eng: 'English', si: 'Sinhala', sin: 'Sinhala', ta: 'Tamil', tam: 'Tamil', hi: 'Hindi', hin: 'Hindi', es: 'Spanish', spa: 'Spanish',
+    fr: 'French', fre: 'French', fra: 'French', de: 'German', ger: 'German', deu: 'German', it: 'Italian', ita: 'Italian', pt: 'Portuguese', por: 'Portuguese',
+    ar: 'Arabic', ara: 'Arabic', zh: 'Chinese', chi: 'Chinese', zho: 'Chinese', ja: 'Japanese', jpn: 'Japanese', ko: 'Korean', kor: 'Korean', ru: 'Russian', rus: 'Russian',
+    nl: 'Dutch', dut: 'Dutch', tr: 'Turkish', tur: 'Turkish', pl: 'Polish', pol: 'Polish', sv: 'Swedish', swe: 'Swedish', id: 'Indonesian', ind: 'Indonesian',
+    ms: 'Malay', may: 'Malay', th: 'Thai', tha: 'Thai', vi: 'Vietnamese', vie: 'Vietnamese', fa: 'Persian', per: 'Persian', he: 'Hebrew', heb: 'Hebrew', und: 'Unknown language' };
+  const langName = (code) => { if (!code) return ''; const c = String(code).toLowerCase(); return LANGS[c] || LANGS[c.split('-')[0]] || (c.length > 3 ? code.charAt(0).toUpperCase() + code.slice(1) : c.toUpperCase()); };
+
+  // ---------- API keys ----------
+  function keys() {
+    const c = store.get('keys', {}) || {};
+    return { os: (c.os || BUILT_IN.os || '').trim(), subdl: (c.subdl || BUILT_IN.subdl || '').trim(), osCustom: !!c.os, sdCustom: !!c.subdl };
+  }
+  const mask = (k) => (k ? '••••••••' + k.slice(-6) : 'none');
+  function renderKeys() {
+    const k = keys();
+    let msg;
+    if (!k.osCustom && !k.sdCustom) msg = 'Using built-in API keys.';
+    else if (k.osCustom && k.sdCustom) msg = 'Using your own API keys.';
+    else msg = 'Using your own ' + (k.osCustom ? 'OpenSubtitles' : 'SubDL') + ' key and the built-in ' + (k.osCustom ? 'SubDL' : 'OpenSubtitles') + ' key.';
+    $('#keyState').textContent = msg;
+    $('#osKeyShow').textContent = mask(k.os); $('#sdKeyShow').textContent = mask(k.subdl);
+    $('#osKeyTag').textContent = k.osCustom ? 'Yours' : 'Built-in';
+    $('#sdKeyTag').textContent = k.sdCustom ? 'Yours' : 'Built-in';
+    $('#keysReset').hidden = !(k.osCustom || k.sdCustom);
+  }
+  function openSettings() { renderKeys(); $('#keysForm').hidden = true; $('#keyActions').hidden = false; openDlg($('#settingsDlg')); }
+
+  // ---------- OpenSubtitles ----------
+  function canonical(params) {
+    return Object.keys(params).filter((k) => params[k] != null && params[k] !== '').sort()
+      .map((k) => encodeURIComponent(k) + '=' + encodeURIComponent(String(params[k]).toLowerCase()).replace(/%20/g, '+')).join('&');
+  }
+  async function osFetch(path, opts) {
+    opts = opts || {};
+    const key = keys().os;
+    if (!key) throw new Error('No OpenSubtitles API key. Add one in Settings.');
+    let url = OS_API + path;
+    if (opts.params) url += '?' + canonical(opts.params);
+    const headers = { 'Api-Key': key, 'X-User-Agent': APP_UA, 'Accept': 'application/json' };
+    if (opts.body) headers['Content-Type'] = 'application/json';
+    let r;
+    try { r = await fetch(url, { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined }); }
+    catch (e) { throw new Error('Couldn\'t reach OpenSubtitles. Check the internet connection.'); }
+    let j = null;
+    try { j = await r.json(); } catch (e) { j = null; }
+    if (!r.ok) {
+      let m = j && (j.message || j.errors) || '';
+      if (Array.isArray(m)) m = m.join('; ');
+      m = String(m).trim();
+      if (r.status === 401 || (r.status === 403 && /consume/i.test(m))) throw new Error('OpenSubtitles didn\'t accept the API key. Check it in Settings.');
+      if (r.status === 429) throw new Error('OpenSubtitles says there were too many requests. Wait a few seconds and try again.');
+      throw new Error('OpenSubtitles says: ' + (m || ('error ' + r.status)));
+    }
+    return j || {};
+  }
+  async function osSearch(v) {
+    const found = new Map();
+    const add = (resp) => {
+      for (const item of (resp && resp.data) || []) {
+        const a = item.attributes || {};
+        for (const f of a.files || []) {
+          if (!f.file_id) continue;
+          let c = found.get(f.file_id);
+          if (!c) {
+            c = { file_id: f.file_id, file_name: f.file_name || '', release: a.release || f.file_name || '', downloads: a.download_count || 0,
+              hi: !!a.hearing_impaired, lang: a.language || '', hash_match: false };
+            found.set(f.file_id, c);
+          }
+          if (a.moviehash_match) c.hash_match = true;
+        }
+      }
+    };
+    const base = { ai_translated: 'exclude' };
+    if (state.videoHash) add(await osFetch('/subtitles', { params: Object.assign({}, base, { moviehash: state.videoHash }) }));
+    if (v.title) {
+      const p = Object.assign({}, base, { query: v.title });
+      const ep = v.episode ? v.episode.match(/S(\d+)E(\d+)/) : null;
+      if (ep) { p.season_number = +ep[1]; p.episode_number = +ep[2]; } else if (v.year) p.year = v.year;
+      add(await osFetch('/subtitles', { params: p }));
+    }
+    return [...found.values()];
+  }
+  async function osDownload(fileId) {
+    const cached = cacheGet('os:' + fileId);
+    if (cached) return b64ToBytes(cached);
+    const j = await osFetch('/download', { method: 'POST', body: { file_id: fileId, sub_format: 'srt' } });
+    if (j.remaining != null) state.remaining = { n: j.remaining, reset: j.reset_time || '' };
+    if (!j.link) throw new Error(j.message || 'OpenSubtitles gave no download link.');
+    let r;
+    try { r = await fetch(j.link); } catch (e) { throw new Error('Your browser couldn\'t download the file from OpenSubtitles.'); }
+    if (!r.ok) throw new Error('The file couldn\'t be downloaded (error ' + r.status + ').');
+    const bytes = await unzipIfNeeded(new Uint8Array(await r.arrayBuffer()));
+    cachePut('os:' + fileId, bytesToB64(bytes));
+    return bytes;
+  }
+
+  // ---------- SubDL ----------
+  async function sdSearch(v) {
+    const key = keys().subdl;
+    if (!key) throw new Error('No SubDL API key. Add one in Settings.');
+    const ep = v.episode ? v.episode.match(/S(\d+)E(\d+)/) : null;
+    const base = { api_key: key, type: ep ? 'tv' : 'movie', subs_per_page: 30, hi: 1, releases: 1 };
+    if (ep) { base.season_number = +ep[1]; base.episode_number = +ep[2]; }
+    const queries = [Object.assign({}, base, { film_name: v.title }, !ep && v.year ? { year: v.year } : {})];
+    const fileName = state.videoName.trim();
+    if (v.source || v.group) queries.push(Object.assign({}, base, { file_name: fileName }));
+    const found = new Map();
+    let lastErr = null, okCount = 0;
+    for (const q of queries) {
+      let r, j;
+      try { r = await fetch(SD_API + '?' + new URLSearchParams(q).toString(), { headers: { Accept: 'application/json' } }); }
+      catch (e) { lastErr = new Error('Couldn\'t reach SubDL from this page. Check the internet connection.'); continue; }
+      try { j = await r.json(); } catch (e) { j = null; }
+      if (!r.ok || !j || j.status === false) {
+        const m = j && (j.error || j.message);
+        lastErr = new Error(m ? 'SubDL says: ' + m : 'SubDL error ' + r.status + '.');
+        continue;
+      }
+      okCount++;
+      for (const s of j.subtitles || []) {
+        if (!s || !s.url) continue;
+        if (found.has(s.url)) continue;
+        found.set(s.url, { url: s.url, release: s.release_name || s.name || '', name: s.name || '', lang: s.lang || s.language || '', hi: !!s.hi,
+          releases: Array.isArray(s.releases) ? s.releases.map((x) => (typeof x === 'string' ? x : x && (x.release_name || x.name))).filter(Boolean) : [] });
+      }
+    }
+    if (!okCount && lastErr) throw lastErr;
+    return [...found.values()];
+  }
+  async function sdDownload(url) {
+    const cached = cacheGet('sd:' + url);
+    if (cached) return b64ToBytes(cached);
+    let r;
+    try { r = await fetch(SD_DL + url); } catch (e) { const err = new Error('Your browser couldn\'t download the file from SubDL.'); err.link = SD_DL + url; throw err; }
+    if (!r.ok) { const err = new Error('SubDL download failed (error ' + r.status + ').'); err.link = SD_DL + url; throw err; }
+    const bytes = await unzipIfNeeded(new Uint8Array(await r.arrayBuffer()));
+    cachePut('sd:' + url, bytesToB64(bytes));
+    return bytes;
+  }
+  async function unzipIfNeeded(bytes) {
+    if (!(bytes[0] === 0x50 && bytes[1] === 0x4B)) return bytes;
+    if (!window.JSZip) throw new Error('The download is a .zip and the unzip helper didn\'t load.');
+    const zip = await window.JSZip.loadAsync(bytes);
+    const entries = Object.values(zip.files).filter((e) => !e.dir && !/__MACOSX|\/\._/.test(e.name) && /\.(srt|vtt|ass|ssa)$/i.test(e.name));
+    if (!entries.length) throw new Error('The downloaded .zip has no subtitle inside.');
+    entries.sort((a, b) => releaseScore(b.name) - releaseScore(a.name) || (b._data && a._data ? b._data.uncompressedSize - a._data.uncompressedSize : 0));
+    return entries[0].async('uint8array');
+  }
+
+  // downloaded references stay in this browser, so a repeat costs no download
+  function bytesToB64(u8) { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); }
+  function b64ToBytes(b64) { const bin = atob(b64); const u8 = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return u8; }
+  function cacheIndex() { return store.get('cacheIdx2', []); }
+  function cacheGet(id) { return cacheIndex().includes(id) ? store.get('ref2.' + id, null) : null; }
+  function cachePut(id, b64) {
+    const idx = cacheIndex().filter((x) => x !== id);
+    idx.push(id);
+    while (idx.length > 30) store.del('ref2.' + idx.shift());
+    while (!store.set('ref2.' + id, b64)) { if (idx.length <= 1) return; store.del('ref2.' + idx.shift()); }
+    store.set('cacheIdx2', idx);
+  }
+  async function osHash(file) {
+    const CH = 65536;
+    if (file.size < CH * 2) return '';
+    const head = new DataView(await file.slice(0, CH).arrayBuffer());
+    const tail = new DataView(await file.slice(file.size - CH).arrayBuffer());
+    const M = (1n << 64n) - 1n;
+    let h = BigInt(file.size);
+    for (let i = 0; i < CH; i += 8) { h = (h + head.getBigUint64(i, true)) & M; h = (h + tail.getBigUint64(i, true)) & M; }
+    return h.toString(16).padStart(16, '0');
+  }
+
+  // ---------- matching ----------
+  function releaseScore(name) {
+    const v = E.parseRelease(state.videoName), r = E.parseRelease(name || '');
+    let s = 0;
+    if (v.group && r.group && v.group.toLowerCase() === r.group.toLowerCase()) s += 30;
+    if (v.source && r.source === v.source) s += 15;
+    else if (/^WEB/.test(v.source) && /^WEB/.test(r.source)) s += 10;
+    if (v.service && r.service === v.service) s += 6;
+    if (v.resolution && r.resolution === v.resolution) s += 4;
+    if ((v.edition || '') !== (r.edition || '')) s -= 20;
+    return s;
+  }
+
+  // ---------- step 1 ----------
+  function renderVideo() {
+    const name = state.videoName.trim();
+    $('#cardVideo').classList.toggle('done', !!name);
+    const box = $('#videoChips');
+    if (!name) { box.innerHTML = ''; return; }
+    const r = E.parseRelease(name);
+    const chips = [];
+    if (r.title) chips.push(['Title', r.title]);
+    if (r.year) chips.push(['Year', r.year]);
+    if (r.episode) chips.push(['', r.episode]);
+    if (r.resolution) chips.push(['', r.resolution]);
+    if (r.source) chips.push(['', r.source]);
+    if (r.service) chips.push(['', r.service]);
+    if (r.edition) chips.push(['', r.edition]);
+    if (r.group) chips.push(['Group', r.group]);
+    if (state.videoSize) chips.push(['', state.videoSize >= 1073741824 ? (state.videoSize / 1073741824).toFixed(2) + ' GB' : Math.max(1, Math.round(state.videoSize / 1048576)) + ' MB']);
+    box.innerHTML = chips.map(([k, v]) => '<span class="chip">' + (k ? esc(k) + ' ' : '') + '<b>' + esc(v) + '</b></span>').join('')
+      + (state.videoHash ? '<span class="chip good">Fingerprint ready</span>' : '')
+      + (r.source ? '' : '<span class="chip warn">Copy type not in the name</span>');
+  }
+  function videoChanged() {
+    if (state.find && state.find.abort) state.find.abort.abort();
+    state.find = null;
+    if (state.ref && state.ref.from && state.ref.from !== 'local') { state.ref = null; renderSub('ref'); }
+    clearResult();
+    renderVideo();
+  }
+
+  // ---------- steps 2 and 3 ----------
+  async function readSubtitle(kind, file) {
+    if (/\.rar$/i.test(file.name)) throw new Error('.rar files can\'t be opened here. Extract the .srt first, or use the .zip version.');
+    const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+    if (/\.zip$/i.test(file.name) || (head[0] === 0x50 && head[1] === 0x4B)) {
+      if (!window.JSZip) throw new Error('Zip files need a helper that didn\'t load (no internet?). Extract the .srt and choose that instead.');
+      const zip = await window.JSZip.loadAsync(file);
+      const entries = [];
+      zip.forEach((path, entry) => { if (!entry.dir && !/__MACOSX|\/\._/.test(path) && /\.(srt|vtt|ass|ssa)$/i.test(path)) entries.push(entry); });
+      if (!entries.length) throw new Error('No subtitle file (.srt, .vtt, .ass) inside ' + file.name + '.');
+      entries.sort((a, b) => releaseScore(b.name) - releaseScore(a.name));
+      const pick = async (entry) => loadBytes(kind, entry.name.replace(/^.*\//, ''), await entry.async('uint8array'), { zip: file.name, entries, chosen: entry.name });
+      await pick(entries[0]);
+      state[kind].pick = pick;
+    } else {
+      loadBytes(kind, file.name, new Uint8Array(await file.arrayBuffer()), null);
+    }
+  }
+  function loadBytes(kind, name, bytes, zipInfo) {
+    const dec = E.decodeBytes(bytes);
+    const p = E.parseSubtitles(dec.text);
+    if (p.cues.length < 10) throw new Error(name + ' has ' + p.cues.length + ' timed lines. That doesn\'t look like a subtitle file.');
+    state[kind] = { name, cues: p.cues, script: p.script, encoding: dec.encoding, legacy: !!dec.legacy, zip: zipInfo, from: 'local' };
+    clearResult();
+    renderSub(kind);
+  }
+  function loadCues(name, cues, meta) {
+    const p = E.parseSubtitles(E.buildSrt(cues));
+    if (p.cues.length < 10) throw new Error('That track has only ' + p.cues.length + ' lines, too few to sync with.');
+    state.ref = Object.assign({ name, cues: p.cues, script: p.script, encoding: 'UTF-8', legacy: false, zip: null }, meta);
+    clearResult();
+    renderSub('ref');
+  }
+  const SOURCE_LABEL = { local: 'CHOSEN FROM THIS DEVICE', emb: 'INSIDE YOUR VIDEO', sd: 'FROM SUBDL', os: 'FROM OPENSUBTITLES' };
+  function renderSub(kind) {
+    const s = state[kind];
+    const box = kind === 'src' ? $('#srcInfo') : $('#refInfo');
+    (kind === 'src' ? $('#cardSrc') : $('#cardRef')).classList.toggle('done', !!s);
+    if (!s) { box.innerHTML = '<p class="empty">' + (kind === 'src' ? 'No subtitle yet.' : 'No reference yet.') + '</p>'; return; }
+    const last = s.cues[s.cues.length - 1];
+    let html = '';
+    if (kind === 'ref') html += '<p class="source">' + SOURCE_LABEL[s.from || 'local'] + '</p>';
+    html += '<p class="file">' + esc(s.name) + '</p>';
+    if (s.zip && s.zip.entries.length > 1) {
+      html += '<label class="field" for="' + kind + 'Pick">From ' + esc(s.zip.zip) + '<select id="' + kind + 'Pick">'
+        + s.zip.entries.map((e) => '<option' + (e.name === s.zip.chosen ? ' selected' : '') + '>' + esc(e.name) + '</option>').join('') + '</select></label>';
+    } else if (s.zip) {
+      html += '<p class="small muted">From ' + esc(s.zip.zip) + '</p>';
+    }
+    const chips = [];
+    if (kind === 'ref' && s.from === 'emb') chips.push('<span class="chip good">Exact timing for your file</span>');
+    if (kind === 'ref' && s.hashMatch) chips.push('<span class="chip good">Exact match for your file</span>');
+    if (kind === 'ref' && s.lang) chips.push('<span class="chip">' + esc(langName(s.lang)) + '</span>');
+    chips.push('<span class="chip"><b>' + s.cues.length + '</b> lines</span>', '<span class="chip">ends <b>' + clock(last.end) + '</b></span>');
+    if (!(kind === 'ref' && s.lang)) chips.push('<span class="chip">' + esc(s.script) + '</span>');
+    if (kind === 'ref' && s.from !== 'emb' && state.videoName.trim()) {
+      const cmp = E.compareReleases(E.parseRelease(state.videoName), E.parseRelease(s.name));
+      if (cmp.level === 'exact') chips.push('<span class="chip good">Same release as your copy</span>');
+      else if (cmp.level === 'close') chips.push('<span class="chip good">Same copy type</span>');
+      else if (cmp.level === 'different') chips.push('<span class="chip warn">' + esc(cmp.notes[0]) + '</span>');
+    }
+    html += '<div class="chips">' + chips.join('') + '</div>';
+    if (kind === 'ref' && s.from === 'os' && state.remaining && !s.cached) html += '<p class="small muted">' + esc(String(state.remaining.n)) + ' OpenSubtitles downloads left today' + (state.remaining.reset ? ' (resets in ' + esc(state.remaining.reset) + ')' : '') + '.</p>';
+    if (kind === 'src' && s.legacy) html += '<p class="note">This file isn\'t Unicode. If it was typed with an old Sinhala font (FM Abhaya and similar), it shows as English letters on most TVs. Timing still gets fixed.</p>';
+    box.innerHTML = html;
+    const zp = box.querySelector('#' + kind + 'Pick');
+    if (zp) zp.addEventListener('change', async () => {
+      const entry = s.zip.entries.find((e) => e.name === zp.value);
+      try { const pick = s.pick; await pick(entry); state[kind].pick = pick; } catch (e) { setStatus(e.message, true); }
+    });
+  }
+
+  async function takeFile(kind, file) {
+    if (!file) return;
+    try {
+      if (kind === 'video') {
+        state.videoFile = file; state.videoName = file.name; state.videoSize = file.size; state.videoHash = '';
+        $('#videoName').value = file.name; videoChanged();
+        try { state.videoHash = await osHash(file); } catch (e) { state.videoHash = ''; }
+        renderVideo();
+        setStatus('');
+      } else {
+        setStatus('Reading ' + file.name + '…');
+        await readSubtitle(kind, file);
+        setStatus(kind === 'ref' ? 'Reference ready. Press Sync subtitles.' : '');
+      }
+    } catch (e) { setStatus(e.message || String(e), true); }
+  }
+
+  // ---------- find reference: one popup, three sources ----------
+  function findKey() { return state.videoName.trim() + '|' + state.videoHash + '|' + (state.videoFile ? state.videoFile.size : 0); }
+  async function findReference(force) {
+    if (!state.videoName.trim()) { setStatus('Choose the movie file (or type its name) in step 1 first.', true); $('#videoName').focus(); return; }
+    const key = findKey();
+    if (!force && state.find && state.find.key === key) { renderFind(); openDlg($('#findDlg')); return; }
+    if (state.find && state.find.abort) state.find.abort.abort();
+    const f = state.find = { key, abort: new AbortController(), groups: { emb: { status: 'loading', items: [] }, sd: { status: 'loading', items: [] }, os: { status: 'loading', items: [] } } };
+    const v = E.parseRelease(state.videoName);
+    $('#findFor').textContent = 'For ' + [v.title + (v.year ? ' (' + v.year + ')' : ''), v.episode, v.resolution, v.source, v.group].filter(Boolean).join(' · ');
+    renderFind();
+    openDlg($('#findDlg'));
+    setStatus('');
+    await Promise.allSettled([runEmbedded(f), runSubdl(f, v), runOs(f, v)]);
+  }
+  function refreshFind(f) { if (state.find === f) renderFind(); }
+  async function runEmbedded(f) {
+    const g = f.groups.emb;
+    const file = state.videoFile;
+    if (!file) { g.status = 'skip'; g.msg = 'Choose the video file in step 1 (not just its name) to look for subtitles inside it.'; return refreshFind(f); }
+    const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+    const isMkv = head[0] === 0x1A && head[1] === 0x45 && head[2] === 0xDF && head[3] === 0xA3;
+    if (!isMkv) {
+      const ext = (file.name.includes('.') ? file.name.split('.').pop() : '').toUpperCase();
+      g.status = 'skip';
+      g.msg = ext === 'MKV' ? 'This file doesn\'t look like a valid MKV, so its subtitles can\'t be read.' : 'Only MKV files carry subtitles this app can read' + (ext ? '; this video is ' + ext : '') + '.';
+      return refreshFind(f);
+    }
+    g.progress = 0;
+    let lastPaint = 0;
+    try {
+      const res = await window.MkvSubs.extract(file, {
+        signal: f.abort.signal,
+        onProgress: (p) => { g.progress = p; const now = Date.now(); if (now - lastPaint > 120) { lastPaint = now; refreshFind(f); } },
+      });
+      g.items = res.tracks.filter((t) => t.cues.length >= 10).map((t) => ({
+        source: 'emb', id: 'emb:' + t.number, track: t,
+        title: (t.name && t.name.toLowerCase() !== langName(t.lang).toLowerCase() ? t.name + ' · ' : '') + langName(t.lang) + ' (track ' + t.number + ')',
+        lang: t.lang,
+        chips: [langName(t.lang), (t.codec.split('/').pop() || '').replace('UTF8', 'SRT'), t.cues.length + ' lines'].concat(t.forced ? ['Forced (partial)'] : []),
+        good: ['Exact timing for your file'],
+        score: 1000 - (t.forced ? 600 : 0) + Math.min(t.cues.length, 2000) / 100,
+      }));
+      g.status = 'done';
+      if (!g.items.length) g.msg = 'No text subtitles inside this video.' + (res.other.length ? ' It has ' + res.other.length + ' picture-based ' + (res.other.length === 1 ? 'track' : 'tracks') + ', which can\'t be used.' : '');
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      g.status = 'error'; g.msg = e.message || String(e);
+    }
+    refreshFind(f);
+  }
+  async function runSubdl(f, v) {
+    const g = f.groups.sd;
+    try {
+      const list = await sdSearch(v);
+      g.items = list.map((c) => {
+        const rs = Math.max(releaseScore(c.release), ...c.releases.map(releaseScore));
+        return { source: 'sd', id: 'sd:' + c.url, url: c.url, title: c.release || c.name, lang: c.lang,
+          chips: [langName(c.lang) || 'Language not given'].concat(c.hi ? ['HI'] : []),
+          good: rs >= 30 ? ['Same release'] : rs >= 15 ? ['Same copy type'] : [],
+          score: rs + (/^(en|english)$/i.test(c.lang) ? 1 : 0) };
+      });
+      g.status = 'done';
+      if (!g.items.length) g.msg = 'Nothing found on SubDL.';
+    } catch (e) { g.status = 'error'; g.msg = e.message || String(e); }
+    refreshFind(f);
+  }
+  async function runOs(f, v) {
+    const g = f.groups.os;
+    try {
+      const list = await osSearch(v);
+      g.items = list.map((c) => {
+        const rs = releaseScore(c.release);
+        return { source: 'os', id: 'os:' + c.file_id, file_id: c.file_id, title: c.release || c.file_name, lang: c.lang, hash: c.hash_match,
+          chips: [langName(c.lang), (c.downloads || 0).toLocaleString() + ' downloads'].concat(c.hi ? ['HI'] : []),
+          good: c.hash_match ? ['Exact match for your file'] : rs >= 30 ? ['Same release'] : rs >= 15 ? ['Same copy type'] : [],
+          score: (c.hash_match ? 100 : 0) + rs + Math.log10(1 + (c.downloads || 0)) * 2 + (c.lang === 'en' ? 1 : 0) };
+      });
+      g.status = 'done';
+      if (!g.items.length) g.msg = 'Nothing found on OpenSubtitles.';
+    } catch (e) { g.status = 'error'; g.msg = e.message || String(e); }
+    refreshFind(f);
+  }
+  const GROUPS = [['emb', 'Inside your video'], ['sd', 'SubDL'], ['os', 'OpenSubtitles']];
+  function renderFind() {
+    const f = state.find;
+    if (!f) return;
+    let best = null;
+    for (const [k] of GROUPS) for (const it of f.groups[k].items) if (!best || it.score > best.score) best = it;
+    const html = GROUPS.map(([k, label]) => {
+      const g = f.groups[k];
+      g.items.sort((a, b) => b.score - a.score);
+      let body = '';
+      if (g.status === 'loading') {
+        body = k === 'emb' && g.progress != null
+          ? '<div class="gmsg"><span class="spinner" aria-hidden="true"></span>Reading the subtitles inside your video… ' + Math.round(g.progress * 100) + '%<div class="bar"><i style="width:' + Math.round(g.progress * 100) + '%"></i></div></div>'
+          : '<div class="gmsg"><span class="spinner" aria-hidden="true"></span>Searching…</div>';
+      } else if (g.items.length) {
+        body = g.items.slice(0, 30).map((it) => {
+          const chips = (it === best ? ['<span class="chip best">Best match</span>'] : [])
+            .concat(it.good.map((x) => '<span class="chip good">' + esc(x) + '</span>'))
+            .concat(it.chips.filter(Boolean).map((x) => '<span class="chip">' + esc(x) + '</span>'));
+          return '<button type="button" class="item' + (it === best ? ' top' : '') + '" data-id="' + esc(it.id) + '"' + (it.busy ? ' aria-busy="true"' : '') + '>'
+            + '<span class="item-main" style="display:grid;gap:6px;min-width:0"><span class="rel">' + esc(it.title) + '</span><span class="chips">' + chips.join('') + '</span></span>'
+            + '<span class="go">' + (it.busy ? '<span class="spinner" aria-hidden="true"></span>Getting…' : 'Use this') + '</span>'
+            + (it.err ? '<span class="ierr">' + esc(it.err) + (it.link ? ' <a href="' + esc(it.link) + '" target="_blank" rel="noopener">Download it yourself</a>, then use “Choose reference subtitle”.' : '') + '</span>' : '')
+            + '</button>';
+        }).join('');
+        if (g.msg) body += '<div class="gmsg">' + esc(g.msg) + '</div>';
+      } else {
+        body = '<div class="gmsg' + (g.status === 'error' ? ' err' : '') + '">' + esc(g.msg || 'Nothing found.') + '</div>';
+      }
+      const count = g.status === 'loading' ? '' : g.items.length ? g.items.length + ' found' : '';
+      return '<section class="group"><div class="group-head"><h4>' + esc(label) + '</h4><span class="count">' + count + '</span></div>' + body + '</section>';
+    }).join('');
+    $('#findBody').innerHTML = html;
+    $('#findBody').querySelectorAll('.item').forEach((btn) => btn.addEventListener('click', () => pickItem(btn.dataset.id)));
+  }
+  async function pickItem(id) {
+    const f = state.find;
+    if (!f) return;
+    let it = null;
+    for (const [k] of GROUPS) { const x = f.groups[k].items.find((y) => y.id === id); if (x) it = x; }
+    if (!it || it.busy) return;
+    it.busy = true; it.err = ''; it.link = ''; renderFind();
+    try {
+      if (it.source === 'emb') {
+        loadCues((state.videoName.replace(/\.[^.]+$/, '') || 'video') + ' · track ' + it.track.number, it.track.cues, { from: 'emb', lang: it.track.lang });
+      } else if (it.source === 'sd') {
+        const cached = !!cacheGet('sd:' + it.url);
+        const bytes = await sdDownload(it.url);
+        loadBytes('ref', (it.title || 'subdl') + '.srt', bytes, null);
+        Object.assign(state.ref, { from: 'sd', lang: it.lang, cached });
+      } else {
+        const cached = !!cacheGet('os:' + it.file_id);
+        const bytes = await osDownload(it.file_id);
+        loadBytes('ref', (it.title || 'opensubtitles') + '.srt', bytes, null);
+        Object.assign(state.ref, { from: 'os', lang: it.lang, hashMatch: !!it.hash, cached });
+      }
+      renderSub('ref');
+      it.busy = false;
+      closeDlg($('#findDlg'));
+      setStatus('Reference ready. Press Sync subtitles.');
+    } catch (e) {
+      it.busy = false; it.err = e.message || String(e); it.link = e.link || '';
+      renderFind();
+    }
+  }
+
+  // ---------- sync ----------
+  function clearResult() { state.res = null; state.out = null; $('#results').hidden = true; }
+  function run() {
+    if (!state.src) { setStatus('Choose the out-of-sync subtitle in step 2.', true); return; }
+    if (!state.ref) { setStatus('Find or choose a reference subtitle in step 3.', true); return; }
+    setStatus('Syncing…');
+    $('#runBtn').disabled = true;
+    setTimeout(() => {
+      try {
+        state.res = E.align(state.src.cues, state.ref.cues, { splits: 'normal', fixFramerate: true });
+        state.out = E.applyTiming(state.src.cues, state.res.scale, state.res.perCueOffsetMs, 0);
+        renderResult();
+        setStatus('Done. ' + state.src.cues.length + ' lines re-timed.');
+        $('#results').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch (e) { setStatus(e.message || String(e), true); }
+      $('#runBtn').disabled = false;
+    }, 30);
+  }
+  function outFileName() {
+    const v = state.videoName.trim().replace(/^.*[\\/]/, '');
+    if (v) return v.replace(/\.[A-Za-z0-9]{2,4}$/, '') + '.' + OUT_LANG + '.srt';
+    return state.src.name.replace(/\.(srt|vtt|ass|ssa|txt)$/i, '') + '.synced.srt';
+  }
+  function renderResult() {
+    const r = state.res, out = state.out;
+    $('#results').hidden = false;
+    const words = {
+      good: ['Good match', 'Most lines now start together with the reference.'],
+      fair: ['Fair match', 'It lined up, but less cleanly. Check it while watching.'],
+      poor: ['Poor match', 'The two files don\'t line up well. The reference is probably for a different movie, episode or cut.'],
+    }[r.verdict];
+    const vEl = $('#verdict'); vEl.className = 'verdict ' + r.verdict; vEl.textContent = words[0];
+    $('#verdictText').textContent = words[1];
+    const segs = r.segments;
+    $('#resChips').innerHTML = ['<span class="chip">Shift <b>' + sec(segs[0].offsetMs) + '</b></span>',
+      '<span class="chip">Speed <b>' + (r.scale === 1 ? 'same' : esc(r.scaleLabel)) + '</b></span>',
+      '<span class="chip">Timing jumps <b>' + (segs.length - 1) + '</b>' + (segs.length > 1 ? ' (' + segs.slice(1).map((s) => clock(s.startMs)).join(', ') + ')' : '') + '</span>',
+      '<span class="chip">In step <b>' + Math.round(r.matchAfter * 100) + '%</b> (was ' + Math.round(r.matchBefore * 100) + '%)</span>'].join('');
+    const notes = [];
+    if (out.movedToZero) notes.push(out.movedToZero + (out.movedToZero === 1 ? ' line' : ' lines') + ' would have started before the film begins (often the translator\'s credit) and now start at 0:00.');
+    if (r.verdict === 'poor') notes.push('Try another reference from “Find reference subtitle”, then sync again.');
+    const rn = $('#resNote'); rn.hidden = !notes.length; rn.className = 'note' + (r.verdict === 'poor' ? ' bad' : ''); rn.textContent = notes.join(' ');
+    $('#outName').textContent = outFileName();
+    const jb = $('#jumpBtns');
+    jb.innerHTML = segs.length > 1 ? '<span class="small muted" style="align-self:center">Look at:</span>' + segs.slice(1).map((s) => '<button class="btn small" type="button" data-at="' + s.startMs + '">Jump at ' + clock(s.startMs) + '</button>').join('') : '';
+    jb.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => setView(+b.dataset.at - 20000)));
+    const endMs = Math.max(out.cues.length ? out.cues[out.cues.length - 1].end : 0, state.ref.cues[state.ref.cues.length - 1].end);
+    $('#scrub').max = String(Math.max(1, Math.floor(endMs / 1000)));
+    setView(segs.length > 1 ? segs[1].startMs - 20000 : (out.cues[Math.min(out.cues.length - 1, 3)] || out.cues[0]).start - 3000);
+  }
+
+  // ---------- timing check ----------
+  function setView(ms) { const sc = $('#scrub'); sc.value = String(Math.max(0, Math.min(+sc.max, Math.round(ms / 1000)))); drawAll(); }
+  function windowMs() { return $('.canvas-box').clientWidth < 560 ? 60000 : 120000; }
+  function drawAll() { if (!state.out || $('#results').hidden) return; drawTimeline(); renderPreview(); $('#scrubLabel').textContent = clock(+$('#scrub').value * 1000); }
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function drawTimeline() {
+    const cv = $('#tl');
+    const w = cv.clientWidth, h = cv.clientHeight, dpr = window.devicePixelRatio || 1;
+    if (!w) return;
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, h);
+    const t0 = +$('#scrub').value * 1000, span = windowMs(), t1 = t0 + span;
+    const labW = w < 560 ? 0 : 82, x0 = labW + 4, x1 = w - 6;
+    const X = (t) => x0 + (t - t0) / span * (x1 - x0);
+    const lanes = [
+      { name: 'Reference', cues: state.ref.cues, color: cssVar('--ice') },
+      { name: 'Before', cues: state.src.cues, color: 'rgba(255,255,255,0.32)' },
+      { name: 'After', cues: state.out.cues, color: cssVar('--accent') },
+    ];
+    const top = 24, laneH = 30, gap = 12;
+    const step = span > 90000 ? 10000 : 5000;
+    g.font = '11px ' + cssVar('--mono');
+    for (let t = Math.ceil(t0 / step) * step; t <= t1; t += step) {
+      const x = X(t);
+      g.strokeStyle = 'rgba(255,255,255,0.07)'; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(Math.round(x) + 0.5, top - 6); g.lineTo(Math.round(x) + 0.5, h - 2); g.stroke();
+      if ((t / step) % 2 === 0 && x - 18 > x0 && x + 18 < x1) { g.fillStyle = cssVar('--muted'); g.textAlign = 'center'; g.fillText(clock(t), x, 13); }
+    }
+    lanes.forEach((ln, i) => {
+      const y = top + i * (laneH + gap);
+      if (labW) { g.fillStyle = cssVar('--muted'); g.textAlign = 'left'; g.font = '600 12px ' + cssVar('--body'); g.fillText(ln.name, 2, y + laneH / 2 + 4); }
+      g.fillStyle = 'rgba(255,255,255,0.04)'; roundRect(g, x0, y, x1 - x0, laneH, 9); g.fill();
+      g.fillStyle = ln.color;
+      for (const c of ln.cues) {
+        if (c.end < t0 || c.start > t1) continue;
+        const a = Math.max(x0, X(c.start)), b = Math.min(x1, X(c.end));
+        if (b - a < 1) continue;
+        roundRect(g, a, y + 6, b - a, laneH - 12, 5); g.fill();
+      }
+    });
+  }
+  function roundRect(g, x, y, w, h, r) { r = Math.min(r, w / 2, h / 2); g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+  function refAt(c) {
+    const cues = state.ref.cues;
+    let lo = 0, hi = cues.length - 1, best = null, bestOv = 0;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (cues[mid].end < c.start - 4000) lo = mid + 1; else hi = mid; }
+    for (let i = Math.max(0, lo - 2); i < cues.length && cues[i].start < c.end + 500; i++) {
+      const ov = Math.min(c.end, cues[i].end) - Math.max(c.start, cues[i].start);
+      if (ov > bestOv) { bestOv = ov; best = cues[i]; }
+    }
+    return best;
+  }
+  function renderPreview() {
+    const t0 = +$('#scrub').value * 1000;
+    const rows = [];
+    for (const c of state.out.cues) { if (c.end >= t0) rows.push(c); if (rows.length >= 7) break; }
+    $('#preview').innerHTML = rows.map((c) => {
+      const rc = refAt(c);
+      return '<tr><td class="t">' + clockFine(c.start) + '</td><td class="si">' + esc(plain(c.text)).replace(/\n/g, '<br>')
+        + '<span class="ref-inline">' + (rc ? esc(plain(rc.text)).replace(/\n/g, ' ') : 'nothing spoken here') + '</span></td>'
+        + (rc ? '<td class="en">' + esc(plain(rc.text)).replace(/\n/g, '<br>') + '</td>' : '<td class="en none">nothing spoken here</td>') + '</tr>';
+    }).join('') || '<tr><td colspan="3" class="muted">No lines after this point.</td></tr>';
+  }
+  function download() {
+    if (!state.out) return;
+    const name = outFileName();
+    const text = '\uFEFF' + E.buildSrt(state.out.cues);
+    const url = URL.createObjectURL(new Blob([text], { type: 'application/x-subrip' }));
+    const a = document.createElement('a'); a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 8000);
+    setStatus('Downloaded ' + name + '.');
+  }
+
+  // ---------- wiring ----------
+  $('#settingsBtn').addEventListener('click', openSettings);
+  document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => closeDlg(b.closest('dialog'))));
+  document.querySelectorAll('dialog').forEach((d) => d.addEventListener('click', (e) => { if (e.target === d) closeDlg(d); }));
+  $('#keysEdit').addEventListener('click', () => { $('#keysForm').hidden = false; $('#keyActions').hidden = true; $('#osKey').focus(); });
+  $('#keysCancel').addEventListener('click', () => { $('#keysForm').hidden = true; $('#keyActions').hidden = false; $('#osKey').value = ''; $('#sdKey').value = ''; });
+  $('#keysForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const os = $('#osKey').value.trim(), sd = $('#sdKey').value.trim();
+    if (!os && !sd) { $('#keyState').textContent = 'Paste at least one key, or press Cancel.'; return; }
+    const c = store.get('keys', {}) || {};
+    if (os) c.os = os;
+    if (sd) c.subdl = sd;
+    store.set('keys', c);
+    $('#osKey').value = ''; $('#sdKey').value = '';
+    $('#keysForm').hidden = true; $('#keyActions').hidden = false;
+    state.find = null;
+    renderKeys();
+    $('#keyState').textContent += ' Saved.';
+  });
+  $('#keysReset').addEventListener('click', () => { store.del('keys'); state.find = null; renderKeys(); });
+  $('#videoFile').addEventListener('change', (e) => { takeFile('video', e.target.files[0]); e.target.value = ''; });
+  $('#srcFile').addEventListener('change', (e) => { takeFile('src', e.target.files[0]); e.target.value = ''; });
+  $('#refFile').addEventListener('change', (e) => { takeFile('ref', e.target.files[0]); e.target.value = ''; });
+  $('#findBtn').addEventListener('click', () => findReference(false));
+  $('#findAgain').addEventListener('click', () => findReference(true));
+  let typing;
+  $('#videoName').addEventListener('input', (e) => {
+    state.videoName = e.target.value; state.videoSize = 0; state.videoHash = ''; state.videoFile = null;
+    clearTimeout(typing); typing = setTimeout(videoChanged, 250);
+  });
+  for (const card of document.querySelectorAll('.card')) {
+    card.addEventListener('dragover', (e) => { e.preventDefault(); card.classList.add('drag'); });
+    card.addEventListener('dragleave', () => card.classList.remove('drag'));
+    card.addEventListener('drop', (e) => { e.preventDefault(); card.classList.remove('drag'); const f = e.dataTransfer.files[0]; if (f) takeFile(card.dataset.kind, f); });
+  }
+  $('#runBtn').addEventListener('click', run);
+  $('#downloadBtn').addEventListener('click', download);
+  $('#scrub').addEventListener('input', drawAll);
+  let rz; window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(drawAll, 120); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawAll);
+})();
+</script>
+</body>
+</html>
